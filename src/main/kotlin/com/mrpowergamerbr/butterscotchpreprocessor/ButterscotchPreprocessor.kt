@@ -3,7 +3,11 @@ package com.mrpowergamerbr.butterscotchpreprocessor
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import javax.imageio.ImageIO
+
+private data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
 
 object ButterscotchPreprocessor {
     @JvmStatic
@@ -55,7 +59,7 @@ object ButterscotchPreprocessor {
             }
         }
 
-        val outputDir = File("sprites_output")
+        val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/build-ps2/")
 
         // Dump raw PNGs
         dumpSprites(dw, texturePages, outputDir)
@@ -72,16 +76,23 @@ object ButterscotchPreprocessor {
 
     private fun processCluts(dw: DataWin, texturePages: List<BufferedImage?>, outputDir: File) {
         val allImages = mutableListOf<Pair<String, BufferedImage>>()
+        // Maps image name to atlas group key (images with the same key should be in the same atlas)
+        val atlasGroupKeys = HashMap<String, String>()
+        // Maps image name to TPAG index (for ATLAS.BIN generation)
+        val tpagIndexMap = HashMap<String, Int>()
 
-        // Collect sprites
+        // Collect sprites - group all frames of a sprite under the same group key
         for ((sprIdx, sprite) in dw.sprt.sprites.withIndex()) {
             val name = sprite.name ?: "sprite_$sprIdx"
+            val groupKey = "spr/$name"
             for ((frameIdx, texOffset) in sprite.textureOffsets.withIndex()) {
                 val tpagIdx = dw.resolveTPAG(texOffset)
                 if (0 > tpagIdx) continue
                 val img = extractFromTPAG(dw.tpag.items[tpagIdx], texturePages)
                 val imgName = if (sprite.textureOffsets.size > 1) "spr/${name}_$frameIdx" else "spr/$name"
                 allImages.add(imgName to img)
+                atlasGroupKeys[imgName] = groupKey
+                tpagIndexMap[imgName] = tpagIdx
             }
         }
 
@@ -90,11 +101,24 @@ object ButterscotchPreprocessor {
             val name = bg.name ?: "bg_$bgIdx"
             val tpagIdx = dw.resolveTPAG(bg.textureOffset)
             if (0 > tpagIdx) continue
-            allImages.add("bg/$name" to extractFromTPAG(dw.tpag.items[tpagIdx], texturePages))
+            val imgName = "bg/$name"
+            allImages.add(imgName to extractFromTPAG(dw.tpag.items[tpagIdx], texturePages))
+            atlasGroupKeys[imgName] = imgName
+            tpagIndexMap[imgName] = tpagIdx
+        }
+
+        // Collect fonts
+        for ((fontIdx, font) in dw.font.fonts.withIndex()) {
+            val name = font.name ?: "font_$fontIdx"
+            val tpagIdx = dw.resolveTPAG(font.textureOffset)
+            if (0 > tpagIdx) continue
+            val imgName = "font/$name"
+            allImages.add(imgName to extractFromTPAG(dw.tpag.items[tpagIdx], texturePages))
+            atlasGroupKeys[imgName] = imgName
+            tpagIndexMap[imgName] = tpagIdx
         }
 
         // Collect unique tiles
-        data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
         val uniqueTiles = LinkedHashMap<TileKey, RoomTile>()
         for (room in dw.room.rooms) {
             for (tile in room.tiles) {
@@ -122,7 +146,34 @@ object ButterscotchPreprocessor {
             g.drawImage(bgImg.getSubimage(key.srcX, key.srcY, key.w, key.h), 0, 0, null)
             g.dispose()
             val bgName = if (dw.bgnd.backgrounds.size > key.bgDef) dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}" else "bg${key.bgDef}"
-            allImages.add("tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}" to tileImg)
+            val imgName = "tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
+            allImages.add(imgName to tileImg)
+            atlasGroupKeys[imgName] = imgName
+        }
+
+        // Resize any images exceeding 512x512 (nearest neighbor, preserving aspect ratio)
+        val maxDim = 512
+        var resizedCount = 0
+        for (i in allImages.indices) {
+            val (name, img) = allImages[i]
+            if (maxDim >= img.width && maxDim >= img.height) continue
+            val scale = minOf(maxDim.toDouble() / img.width, maxDim.toDouble() / img.height)
+            val newW = maxOf((img.width * scale).toInt(), 1)
+            val newH = maxOf((img.height * scale).toInt(), 1)
+            val resized = BufferedImage(newW, newH, BufferedImage.TYPE_INT_ARGB)
+            // Nearest neighbor: sample from source directly
+            for (y in 0 until newH) {
+                val srcY = (y * img.height) / newH
+                for (x in 0 until newW) {
+                    val srcX = (x * img.width) / newW
+                    resized.setRGB(x, y, img.getRGB(srcX, srcY))
+                }
+            }
+            allImages[i] = name to resized
+            resizedCount++
+        }
+        if (resizedCount > 0) {
+            println("Resized $resizedCount images to fit within ${maxDim}x${maxDim}")
         }
 
         println("Total images to process: ${allImages.size}")
@@ -197,6 +248,270 @@ object ButterscotchPreprocessor {
         val total8Colors = mergedGroups.filter { it.bpp == 8 }.sumOf { it.colors.size }
         println("  Total 4bpp palette entries: $total4Colors (across $merged4 CLUTs)")
         println("  Total 8bpp palette entries: $total8Colors (across $merged8 CLUTs)")
+
+        // Step 5: Pack into texture atlases
+        println("\n=== Texture Atlas Packing ===")
+        val atlases = TextureAtlasPacker.packAtlases(clutImages, atlasGroupKeys)
+
+        val atlas4 = atlases.filter { it.bpp == 4 }
+        val atlas8 = atlases.filter { it.bpp == 8 }
+        println("  4bpp atlases: ${atlas4.size}, 8bpp atlases: ${atlas8.size} (${atlases.size} total)")
+        for (atlas in atlases) {
+            val usedArea = atlas.entries.sumOf { it.image.width * it.image.height }
+            val totalArea = atlas.width * atlas.height
+            val utilization = (usedArea * 100.0 / totalArea)
+            println("    Atlas #${atlas.id} (${atlas.bpp}bpp): ${atlas.entries.size} images [${atlas.entries.joinToString(", ") { it.image.name }}], %.1f%% utilization".format(utilization))
+        }
+
+        // Write debug atlas images
+        val atlasDir = File(outputDir, "atlases")
+        atlasDir.mkdirs()
+        for (atlas in atlases) {
+            val debugImg = TextureAtlasPacker.renderAtlasDebug(atlas)
+            ImageIO.write(debugImg, "PNG", File(atlasDir, "atlas_${atlas.id}_${atlas.bpp}bpp.png"))
+        }
+        println("  Wrote ${atlases.size} atlas debug images to ${atlasDir.path}")
+
+        // Step 6: Write CLUT binary files (BGRA32, swizzled, alpha remapped to 0-128)
+        println("\n=== Writing CLUT Binaries ===")
+        writeClutBinaries(mergedGroups, outputDir)
+
+        // Step 7: Write texture atlas binaries
+        println("\n=== Writing Texture Binaries ===")
+        writeTexturePages(atlases, outputDir)
+
+        // Step 8: Build reverse lookups and write ATLAS.BIN
+        println("\n=== Writing ATLAS.BIN ===")
+
+        // imageName -> per-bpp CLUT index (index within CLUT4.BIN or CLUT8.BIN)
+        val clutIndexMap = HashMap<String, Int>()
+        // Assign sequential indices separately for 4bpp and 8bpp groups
+        var clut4Idx = 0
+        var clut8Idx = 0
+        for (group in mergedGroups.sortedBy { it.id }) {
+            val idx = if (group.bpp == 4) clut4Idx++ else clut8Idx++
+            for (name in group.imageNames) {
+                clutIndexMap[name] = idx
+            }
+        }
+
+        // imageName -> (atlas, entry)
+        val atlasEntryMap = HashMap<String, Pair<TextureAtlas, AtlasEntry>>()
+        for (atlas in atlases) {
+            for (entry in atlas.entries) {
+                atlasEntryMap[entry.image.name] = atlas to entry
+            }
+        }
+
+        // Reverse lookup: TPAG index -> image name
+        val tpagIdxToImageName = HashMap<Int, String>()
+        for ((imgName, tpagIdx) in tpagIndexMap) {
+            tpagIdxToImageName[tpagIdx] = imgName
+        }
+
+        writeAtlasMetadata(dw, uniqueTiles, tpagIdxToImageName, atlasEntryMap, clutIndexMap, outputDir)
+    }
+
+    // Converts ARGB palette to PS2 RGBA format with alpha remapped to 0-128 range
+    private fun convertARGBtoPS2RGBA(argb: Int): Int {
+        val a = (argb ushr 24) and 0xFF
+        val r = (argb ushr 16) and 0xFF
+        val g = (argb ushr 8) and 0xFF
+        val b = argb and 0xFF
+        // PS2 alpha: 0-255 -> 0-128 (>> 1), fully opaque = 0x80
+        val ps2Alpha = a shr 1
+        return (ps2Alpha shl 24) or (b shl 16) or (g shl 8) or r
+    }
+
+    // PS2 CSM1 CLUT swizzle for 8bpp: swap entries where (i & 0x18) == 8 with i+8
+    private fun swizzlePalette8bpp(palette: IntArray): IntArray {
+        val swizzled = palette.copyOf()
+        for (i in swizzled.indices) {
+            if ((i and 0x18) == 8) {
+                val tmp = swizzled[i]
+                swizzled[i] = swizzled[i + 8]
+                swizzled[i + 8] = tmp
+            }
+        }
+        return swizzled
+    }
+
+    private fun writeClutBinaries(mergedGroups: List<ClutGroup>, outputDir: File) {
+        val groups4 = mergedGroups.filter { it.bpp == 4 }.sortedBy { it.id }
+        val groups8 = mergedGroups.filter { it.bpp == 8 }.sortedBy { it.id }
+
+        for ((filename, groups, paletteSize) in listOf(
+            Triple("CLUT4.BIN", groups4, 16),
+            Triple("CLUT8.BIN", groups8, 256)
+        )) {
+            if (groups.isEmpty()) {
+                println("  $filename: skipped (no CLUTs)")
+                continue
+            }
+
+            // Each CLUT is paletteSize entries of 4 bytes (PS2 RGBA32)
+            val buf = ByteBuffer.allocate(groups.size * paletteSize * 4)
+            buf.order(ByteOrder.LITTLE_ENDIAN)
+
+            for (group in groups) {
+                var palette = IntArray(paletteSize)
+                // Copy the group's palette (may be shorter than paletteSize, rest stays 0)
+                System.arraycopy(group.palette, 0, palette, 0, minOf(group.palette.size, paletteSize))
+
+                // Convert ARGB to PS2 RGBA with alpha remap
+                for (i in palette.indices) {
+                    palette[i] = convertARGBtoPS2RGBA(palette[i])
+                }
+
+                // Swizzle 8bpp palettes for CSM1
+                if (paletteSize == 256) {
+                    palette = swizzlePalette8bpp(palette)
+                }
+
+                for (color in palette) {
+                    buf.putInt(color)
+                }
+            }
+
+            val file = File(outputDir, filename)
+            file.writeBytes(buf.array())
+            println("  $filename: ${groups.size} CLUTs, ${buf.capacity()} bytes")
+        }
+    }
+
+    private fun writeTexturePages(atlases: List<TextureAtlas>, outputDir: File) {
+        val headerSize = 128
+
+        for (atlas in atlases) {
+            // Composite all entries into a single pixel index buffer
+            val canvas = ByteArray(atlas.width * atlas.height)
+            for (entry in atlas.entries) {
+                val img = entry.image
+                for (y in 0 until img.height) {
+                    for (x in 0 until img.width) {
+                        canvas[(entry.y + y) * atlas.width + (entry.x + x)] =
+                            img.indices[y * img.width + x]
+                    }
+                }
+            }
+
+            // Pack pixel data according to bpp
+            val pixelData: ByteArray
+            if (atlas.bpp == 4) {
+                // 4bpp: two pixels per byte (low nibble = even pixel, high nibble = odd pixel)
+                val packedSize = (atlas.width * atlas.height + 1) / 2
+                pixelData = ByteArray(packedSize)
+                for (i in canvas.indices step 2) {
+                    val lo = canvas[i].toInt() and 0x0F
+                    val hi = if (i + 1 < canvas.size) (canvas[i + 1].toInt() and 0x0F) shl 4 else 0
+                    pixelData[i / 2] = (lo or hi).toByte()
+                }
+            } else {
+                // 8bpp: one byte per pixel, already in the right format
+                pixelData = canvas
+            }
+
+            // Build the file: 128-byte header + pixel data
+            val buf = ByteBuffer.allocate(headerSize + pixelData.size)
+            buf.order(ByteOrder.LITTLE_ENDIAN)
+
+            // Header
+            buf.put(0.toByte())                  // version
+            buf.putShort(atlas.width.toShort())   // width
+            buf.putShort(atlas.height.toShort())  // height
+            buf.put(atlas.bpp.toByte())           // bpp
+            buf.putInt(pixelData.size)            // pixelDataSize
+
+            // Pad the rest of the header to 128 bytes (already zeroed by allocate)
+            buf.position(headerSize)
+
+            // Pixel data
+            buf.put(pixelData)
+
+            val filename = "TEX${atlas.id}.BIN"
+            val file = File(outputDir, filename)
+            file.writeBytes(buf.array())
+            println("  $filename: ${atlas.width}x${atlas.height} ${atlas.bpp}bpp, ${pixelData.size} bytes pixel data")
+        }
+    }
+
+    private fun writeAtlasMetadata(
+        dw: DataWin,
+        uniqueTiles: LinkedHashMap<TileKey, RoomTile>,
+        tpagIdxToImageName: Map<Int, String>,
+        atlasEntryMap: Map<String, Pair<TextureAtlas, AtlasEntry>>,
+        clutIndexMap: Map<String, Int>,
+        outputDir: File
+    ) {
+        val tpagCount = dw.tpag.items.size
+        val tileCount = uniqueTiles.size
+        val tpagEntrySize = 13  // 6*uint16 + 1*uint8
+        val tileEntrySize = 23  // 11*int16/uint16 + 1*uint8
+        val headerSize = 5
+        val totalSize = headerSize + tpagCount * tpagEntrySize + tileCount * tileEntrySize
+
+        val buf = ByteBuffer.allocate(totalSize)
+        buf.order(ByteOrder.LITTLE_ENDIAN)
+
+        // Header
+        buf.put(0.toByte())                       // version
+        buf.putShort(tpagCount.toShort())          // tpagEntryCount
+        buf.putShort(tileCount.toShort())          // tileEntryCount
+
+        // TPAG entries
+        var mappedTpagCount = 0
+        for (tpagIdx in 0 until tpagCount) {
+            val imgName = tpagIdxToImageName[tpagIdx]
+            if (imgName != null) {
+                val pair = atlasEntryMap[imgName]
+                if (pair != null) {
+                    val (atlas, entry) = pair
+                    buf.putShort(atlas.id.toShort())             // atlasId
+                    buf.putShort(entry.x.toShort())              // atlasX
+                    buf.putShort(entry.y.toShort())              // atlasY
+                    buf.putShort(entry.image.width.toShort())    // width
+                    buf.putShort(entry.image.height.toShort())   // height
+                    buf.putShort((clutIndexMap[imgName] ?: 0).toShort()) // clutIndex
+                    buf.put(atlas.bpp.toByte())                  // bpp
+                    mappedTpagCount++
+                    continue
+                }
+            }
+            // Unmapped TPAG entry
+            buf.putShort(0xFFFF.toShort())  // atlasId = unmapped
+            buf.putShort(0)                 // atlasX
+            buf.putShort(0)                 // atlasY
+            buf.putShort(0)                 // width
+            buf.putShort(0)                 // height
+            buf.putShort(0)                 // clutIndex
+            buf.put(0.toByte())             // bpp
+        }
+
+        // Tile entries
+        for ((key, _) in uniqueTiles) {
+            val bgName = if (dw.bgnd.backgrounds.size > key.bgDef) dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}" else "bg${key.bgDef}"
+            val imgName = "tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
+            val pair = atlasEntryMap[imgName]
+            val atlas = pair?.first
+            val entry = pair?.second
+
+            buf.putShort(key.bgDef.toShort())                          // bgDef
+            buf.putShort(key.srcX.toShort())                           // srcX
+            buf.putShort(key.srcY.toShort())                           // srcY
+            buf.putShort(key.w.toShort())                              // srcW
+            buf.putShort(key.h.toShort())                              // srcH
+            buf.putShort((atlas?.id ?: 0xFFFF).toShort())              // atlasId
+            buf.putShort((entry?.x ?: 0).toShort())                    // atlasX
+            buf.putShort((entry?.y ?: 0).toShort())                    // atlasY
+            buf.putShort((entry?.image?.width ?: 0).toShort())         // width
+            buf.putShort((entry?.image?.height ?: 0).toShort())        // height
+            buf.putShort((clutIndexMap[imgName] ?: 0).toShort())       // clutIndex
+            buf.put((atlas?.bpp ?: 0).toByte())                        // bpp
+        }
+
+        val file = File(outputDir, "ATLAS.BIN")
+        file.writeBytes(buf.array())
+        println("  ATLAS.BIN: $tpagCount TPAG entries ($mappedTpagCount mapped), $tileCount tile entries, $totalSize bytes")
     }
 
     private fun extractFromTPAG(tpag: TexturePageItem, texturePages: List<BufferedImage?>): BufferedImage {
@@ -281,8 +596,6 @@ object ButterscotchPreprocessor {
     private fun dumpTiles(dw: DataWin, texturePages: List<BufferedImage?>, outputDir: File) {
         val tilesDir = File(outputDir, "tiles")
         tilesDir.mkdirs()
-
-        data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
 
         val uniqueTiles = LinkedHashMap<TileKey, RoomTile>()
         for (room in dw.room.rooms) {

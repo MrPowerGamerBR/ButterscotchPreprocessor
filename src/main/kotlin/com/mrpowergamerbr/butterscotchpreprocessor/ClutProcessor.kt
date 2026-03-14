@@ -231,7 +231,22 @@ object ClutProcessor {
                     if (!clutB.alive) continue
                     if (clutA.bpp != clutB.bpp) continue
 
-                    val unionSize = (clutA.colors union clutB.colors).size
+                    // Compute union size without allocating a new set,
+                    // with early exit if we exceed the slot limit
+                    val (smaller, larger) = if (clutA.colors.size > clutB.colors.size)
+                        clutB.colors to clutA.colors
+                    else
+                        clutA.colors to clutB.colors
+
+                    var unionSize = larger.size
+                    val limit = minOf(maxSlots, bestUnionSize - 1)
+                    for (color in smaller) {
+                        if (color !in larger) {
+                            unionSize++
+                            if (unionSize > limit) break
+                        }
+                    }
+
                     if (maxSlots >= unionSize && unionSize < bestUnionSize) {
                         bestUnionSize = unionSize
                         bestPartner = clutB
