@@ -59,7 +59,7 @@ object ButterscotchPreprocessor {
             }
         }
 
-        val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/build-ps2/")
+        val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/PizzaTower/")
 
         // Dump raw PNGs
         dumpSprites(dw, texturePages, outputDir)
@@ -118,10 +118,11 @@ object ButterscotchPreprocessor {
             tpagIndexMap[imgName] = tpagIdx
         }
 
-        // Collect unique tiles
+        // Collect unique tiles, filtering out tiles with invalid background definitions
         val uniqueTiles = LinkedHashMap<TileKey, RoomTile>()
         for (room in dw.room.rooms) {
             for (tile in room.tiles) {
+                if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= dw.bgnd.backgrounds.size) continue
                 uniqueTiles.putIfAbsent(
                     TileKey(tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height),
                     tile
@@ -131,7 +132,6 @@ object ButterscotchPreprocessor {
         val bgImages = HashMap<Int, BufferedImage>()
         for ((key, _) in uniqueTiles) {
             if (bgImages.containsKey(key.bgDef)) continue
-            if (0 > key.bgDef || key.bgDef >= dw.bgnd.backgrounds.size) continue
             val bg = dw.bgnd.backgrounds[key.bgDef]
             val tpagIdx = dw.resolveTPAG(bg.textureOffset)
             if (0 > tpagIdx) continue
@@ -145,7 +145,7 @@ object ButterscotchPreprocessor {
             val g = tileImg.createGraphics()
             g.drawImage(bgImg.getSubimage(key.srcX, key.srcY, key.w, key.h), 0, 0, null)
             g.dispose()
-            val bgName = if (dw.bgnd.backgrounds.size > key.bgDef) dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}" else "bg${key.bgDef}"
+            val bgName = dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
             val imgName = "tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
             allImages.add(imgName to tileImg)
             atlasGroupKeys[imgName] = imgName
@@ -509,7 +509,7 @@ object ButterscotchPreprocessor {
 
         // Tile entries
         for ((key, _) in uniqueTiles) {
-            val bgName = if (dw.bgnd.backgrounds.size > key.bgDef) dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}" else "bg${key.bgDef}"
+            val bgName = dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
             val imgName = "tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
             val pair = atlasEntryMap[imgName]
             val atlas = pair?.first
@@ -620,6 +620,7 @@ object ButterscotchPreprocessor {
         val uniqueTiles = LinkedHashMap<TileKey, RoomTile>()
         for (room in dw.room.rooms) {
             for (tile in room.tiles) {
+                if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= dw.bgnd.backgrounds.size) continue
                 val key = TileKey(tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height)
                 uniqueTiles.putIfAbsent(key, tile)
             }
@@ -628,7 +629,6 @@ object ButterscotchPreprocessor {
         val bgImages = HashMap<Int, BufferedImage>()
         for ((key, _) in uniqueTiles) {
             if (bgImages.containsKey(key.bgDef)) continue
-            if (0 > key.bgDef || key.bgDef >= dw.bgnd.backgrounds.size) continue
             val bg = dw.bgnd.backgrounds[key.bgDef]
             val tpagIdx = dw.resolveTPAG(bg.textureOffset)
             if (0 > tpagIdx) continue
@@ -647,7 +647,7 @@ object ButterscotchPreprocessor {
             g.drawImage(tileImg, 0, 0, null)
             g.dispose()
 
-            val bgName = if (dw.bgnd.backgrounds.size > key.bgDef) dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}" else "bg${key.bgDef}"
+            val bgName = dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
             ImageIO.write(outImg, "PNG", File(tilesDir, "${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}.png"))
             count++
         }
