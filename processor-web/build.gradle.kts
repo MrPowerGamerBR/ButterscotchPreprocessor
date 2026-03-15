@@ -11,13 +11,14 @@ kotlin {
     }
 
     sourceSets {
-        jsMain.dependencies {
-            implementation(project(":processor-common"))
-            implementation("net.perfectdreams.compose.htmldreams:html-core:1.9.0-beta1-v2")
-            implementation(compose.runtime)
-            implementation(libs.kotlinWrappers.browser)
-            implementation(libs.kotlinWrappers.js)
-
+        jsMain {
+            dependencies {
+                implementation(project(":processor-common"))
+                implementation("net.perfectdreams.compose.htmldreams:html-core:1.9.0-beta1-v2")
+                implementation(compose.runtime)
+                implementation(libs.kotlinWrappers.browser)
+                implementation(libs.kotlinWrappers.js)
+            }
         }
     }
 }

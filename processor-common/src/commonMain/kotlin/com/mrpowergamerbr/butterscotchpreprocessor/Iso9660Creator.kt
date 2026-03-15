@@ -138,9 +138,10 @@ class Iso9660Creator(
         // ---- File Data ----
         for (p in placements) {
             writer.writeByteArray(p.file.data)
-            val remainder = p.file.data.size % SECTOR_SIZE
-            if (remainder != 0) {
-                writer.writeZeroPadding(SECTOR_SIZE - remainder)
+            val targetSize = p.sectorCount * SECTOR_SIZE
+            val padding = targetSize - p.file.data.size
+            if (padding > 0) {
+                writer.writeZeroPadding(padding)
             }
         }
 

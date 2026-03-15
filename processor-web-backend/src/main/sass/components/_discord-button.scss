@@ -1,0 +1,70 @@
+@use "../placeholders/reset-button-styling";
+
+:where(a, a:visited) {
+    color: var(--link-color);
+    transition: 0.25s;
+
+    &:hover {
+        color: oklch(from var(--link-color) calc(l - .1) c h)
+    }
+}
+
+a:has(.discord-button) {
+  text-decoration: none;
+}
+
+.discord-button {
+    --button-color: #757575;
+    box-shadow: inset 0px 0.5px 0px oklch(from var(--button-color) calc(l + .1) c h), var(--shadow-elevation-1);
+    @extend %reset-button-styling;
+    color: white;
+    font-weight: bold;
+    border-radius: var(--nice-border-radius);
+    padding: 0.25em 1em;
+    transition-duration: 0.25s;
+    opacity: 1;
+    background-color: var(--button-color);
+    border: 1px solid var(--soft-border-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+
+    &.text-with-icon {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+
+        svg {
+            width: 1em;
+            height: 1em;
+            translate: 0;
+        }
+    }
+
+    &:hover {
+        background-color: oklch(from var(--button-color) calc(l - .1) c h);
+    }
+
+    &:disabled {
+        --button-color: #757575;
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    &.primary {
+        --button-color: var(--butterscotch-blue);
+    }
+
+    &.success {
+        --button-color: #298546;
+    }
+
+    &.danger {
+        --button-color: #da373c;
+    }
+}
+
+a.discord-button {
+    text-decoration: none;
+}

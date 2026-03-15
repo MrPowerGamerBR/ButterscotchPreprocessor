@@ -14,3 +14,4 @@ rootProject.name = "ButterscotchPreprocessor"
 include(":processor-common")
 include(":processor-cli")
 include(":processor-web")
+include(":processor-web-backend")
