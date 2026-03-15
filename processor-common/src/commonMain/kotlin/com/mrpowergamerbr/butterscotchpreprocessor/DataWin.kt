@@ -1,7 +1,5 @@
 package com.mrpowergamerbr.butterscotchpreprocessor
 
-import java.io.File
-import java.nio.ByteBuffer
 import kotlin.math.sqrt
 
 // Butterscotch data.win port to C
@@ -614,12 +612,11 @@ class DataWin {
 
     val tpagOffsetMap = HashMap<Int, Int>()
 
-    fun resolveTPAG(offset: Int): Int = tpagOffsetMap.getOrDefault(offset, -1)
+    fun resolveTPAG(offset: Int): Int = tpagOffsetMap[offset] ?: -1
 
     companion object {
-        fun parse(filePath: String, options: DataWinParserOptions = DataWinParserOptions()): DataWin {
-            val bytes = File(filePath).readBytes()
-            val reader = BinaryReader(ByteBuffer.wrap(bytes))
+        fun parse(bytes: ByteArray, options: DataWinParserOptions = DataWinParserOptions()): DataWin {
+            val reader = BinaryReader(bytes)
             val dw = DataWin()
 
             // Validate FORM header
@@ -666,6 +663,8 @@ class DataWin {
 
                 reader.position = chunkEnd
             }
+
+            println("Done!")
 
             return dw
         }
@@ -1266,7 +1265,7 @@ class DataWin {
                 val length = reader.readInt32()
                 val bytes = reader.readBytes(length)
                 reader.position = saved
-                String(bytes, Charsets.UTF_8)
+                bytes.decodeToString()
             }
         }
 

@@ -1,27 +1,18 @@
 plugins {
-    kotlin("jvm") version "2.3.10"
-    application
-}
-
-application {
-    mainClass.set("com.mrpowergamerbr.butterscotchpreprocessor.ButterscotchPreprocessor")
+    alias(libs.plugins.kotlin.multiplatform) apply false
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.compose) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
 group = "com.mrpowergamerbr.butterscotchpreprocessor"
 version = "1.0-SNAPSHOT"
 
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    testImplementation(kotlin("test"))
-}
-
-kotlin {
-    jvmToolchain(21)
-}
-
-tasks.test {
-    useJUnitPlatform()
+allprojects {
+    repositories {
+        mavenCentral()
+        google()
+        maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
+        maven("https://repo.perfectdreams.net/")
+    }
 }

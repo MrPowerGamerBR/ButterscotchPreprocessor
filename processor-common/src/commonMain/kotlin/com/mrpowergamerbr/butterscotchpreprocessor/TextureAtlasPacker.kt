@@ -1,10 +1,5 @@
 package com.mrpowergamerbr.butterscotchpreprocessor
 
-import java.awt.Color
-import java.awt.image.BufferedImage
-import java.io.File
-import javax.imageio.ImageIO
-
 data class AtlasEntry(
     val image: ClutImage,
     val x: Int,
@@ -28,9 +23,15 @@ object TextureAtlasPacker {
         val by4bpp = images.filter { it.bpp == 4 }
         val by8bpp = images.filter { it.bpp == 8 }
 
+        println("  packAtlases: ${by4bpp.size} 4bpp images, ${by8bpp.size} 8bpp images")
+
         val atlases = mutableListOf<TextureAtlas>()
-        packByBpp(by4bpp, 4, groupKeys, atlases)
-        packByBpp(by8bpp, 8, groupKeys, atlases)
+        val packers = mutableListOf<MaxRectsPacker>()
+        println("  Packing 4bpp...")
+        packByBpp(by4bpp, 4, groupKeys, atlases, packers)
+        println("  Packing 8bpp...")
+        packByBpp(by8bpp, 8, groupKeys, atlases, packers)
+        println("  Packing done.")
         return atlases
     }
 
@@ -38,7 +39,8 @@ object TextureAtlasPacker {
         images: List<ClutImage>,
         bpp: Int,
         groupKeys: Map<String, String>,
-        atlases: MutableList<TextureAtlas>
+        atlases: MutableList<TextureAtlas>,
+        packers: MutableList<MaxRectsPacker>
     ) {
         if (images.isEmpty()) return
 
@@ -54,15 +56,41 @@ object TextureAtlasPacker {
             entry.value.sumOf { it.width * it.height }
         }
 
-        for ((_, groupImages) in sortedGroups) {
+        for ((groupIdx, entry) in sortedGroups.withIndex()) {
+            val (_, groupImages) = entry
+            if (groupIdx % 100 == 0) {
+                println("    Group $groupIdx/${sortedGroups.size} (${groupImages.size} images, ${atlases.size} atlases so far)")
+            }
+
             // Sort images within group by height descending for better packing
             val sorted = groupImages.sortedByDescending { maxOf(it.width, it.height) }
 
             // Try to fit the entire group into one existing atlas (same bpp)
             var packed = false
-            for (atlas in atlases) {
+            for (i in atlases.indices) {
+                val atlas = atlases[i]
                 if (atlas.bpp != bpp) continue
-                if (tryPackAll(atlas, sorted)) {
+                val packer = packers[i]
+
+                // Speculatively try on a clone of the packer
+                val clonedPacker = packer.clone()
+                val placements = mutableListOf<Pair<ClutImage, Pair<Int, Int>>>()
+                var allFit = true
+                for (img in sorted) {
+                    val pos = clonedPacker.insert(img.width, img.height)
+                    if (pos == null) {
+                        allFit = false
+                        break
+                    }
+                    placements.add(img to pos)
+                }
+
+                if (allFit) {
+                    // Commit: replace the packer with the clone and add entries
+                    packers[i] = clonedPacker
+                    for ((img, pos) in placements) {
+                        atlas.entries.add(AtlasEntry(img, pos.first, pos.second))
+                    }
                     packed = true
                     break
                 }
@@ -86,63 +114,13 @@ object TextureAtlasPacker {
                     }
 
                     if (atlas.entries.isEmpty()) {
-                        // Nothing could be packed (all remaining are too large or something went wrong)
                         break
                     }
                     atlases.add(atlas)
+                    packers.add(packer)
                 }
             }
         }
-    }
-
-    private fun tryPackAll(atlas: TextureAtlas, images: List<ClutImage>): Boolean {
-        // Build a packer that reflects the current atlas state
-        val packer = MaxRectsPacker(atlas.width, atlas.height)
-        for (entry in atlas.entries) {
-            packer.reserve(entry.x, entry.y, entry.image.width, entry.image.height)
-        }
-
-        // Try to fit all new images
-        val placements = mutableListOf<Pair<ClutImage, Pair<Int, Int>>>()
-        for (img in images) {
-            val pos = packer.insert(img.width, img.height) ?: return false
-            placements.add(img to pos)
-        }
-
-        // All fit, commit the placements
-        for ((img, pos) in placements) {
-            atlas.entries.add(AtlasEntry(img, pos.first, pos.second))
-        }
-        return true
-    }
-
-    // Render an atlas to a BufferedImage for debugging/verification
-    fun renderAtlas(atlas: TextureAtlas): BufferedImage {
-        val img = BufferedImage(atlas.width, atlas.height, BufferedImage.TYPE_INT_ARGB)
-        val g = img.createGraphics()
-
-        for (entry in atlas.entries) {
-            val rendered = ClutProcessor.renderClutImage(entry.image)
-            g.drawImage(rendered, entry.x, entry.y, null)
-        }
-
-        g.dispose()
-        return img
-    }
-
-    // Render an atlas with colored outlines around each entry for debugging
-    fun renderAtlasDebug(atlas: TextureAtlas): BufferedImage {
-        val img = renderAtlas(atlas)
-        val g = img.createGraphics()
-
-        val colors = arrayOf(Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW, Color.CYAN, Color.MAGENTA, Color.ORANGE)
-        for ((i, entry) in atlas.entries.withIndex()) {
-            g.color = colors[i % colors.size]
-            g.drawRect(entry.x, entry.y, entry.image.width - 1, entry.image.height - 1)
-        }
-
-        g.dispose()
-        return img
     }
 }
 
@@ -152,10 +130,13 @@ class MaxRectsPacker(private val binWidth: Int, private val binHeight: Int) {
 
     data class Rect(val x: Int, val y: Int, val width: Int, val height: Int)
 
-    fun reserve(x: Int, y: Int, w: Int, h: Int) {
-        splitFreeRects(Rect(x, y, w, h))
-        pruneFreeRects()
+    // Private constructor for cloning
+    private constructor(binWidth: Int, binHeight: Int, freeRects: List<Rect>) : this(binWidth, binHeight) {
+        this.freeRects.clear()
+        this.freeRects.addAll(freeRects)
     }
+
+    fun clone(): MaxRectsPacker = MaxRectsPacker(binWidth, binHeight, freeRects)
 
     fun insert(w: Int, h: Int): Pair<Int, Int>? {
         var bestX = -1
