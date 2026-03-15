@@ -278,7 +278,7 @@ object ButterscotchPreprocessor {
 
         // Step 7: Write texture atlas binaries
         println("\n=== Writing Texture Binaries ===")
-        writeTexturePages(atlases, outputDir)
+        val atlasOffsets = writeTexturePages(atlases, outputDir)
 
         // Step 8: Build reverse lookups and write ATLAS.BIN
         println("\n=== Writing ATLAS.BIN ===")
@@ -309,7 +309,7 @@ object ButterscotchPreprocessor {
             tpagIdxToImageName[tpagIdx] = imgName
         }
 
-        writeAtlasMetadata(dw, uniqueTiles, tpagIdxToImageName, atlasEntryMap, clutIndexMap, outputDir)
+        writeAtlasMetadata(dw, uniqueTiles, tpagIdxToImageName, atlasEntryMap, clutIndexMap, atlasOffsets, outputDir)
     }
 
     // Converts ARGB palette to PS2 RGBA format with alpha remapped to 0-128 range
@@ -379,60 +379,71 @@ object ButterscotchPreprocessor {
         }
     }
 
-    private fun writeTexturePages(atlases: List<TextureAtlas>, outputDir: File) {
+    private fun writeTexturePages(atlases: List<TextureAtlas>, outputDir: File): Map<Int, Long> {
         val headerSize = 128
+        val atlasOffsets = HashMap<Int, Long>()
+        var currentOffset = 0L
 
-        for (atlas in atlases) {
-            // Composite all entries into a single pixel index buffer
-            val canvas = ByteArray(atlas.width * atlas.height)
-            for (entry in atlas.entries) {
-                val img = entry.image
-                for (y in 0 until img.height) {
-                    for (x in 0 until img.width) {
-                        canvas[(entry.y + y) * atlas.width + (entry.x + x)] =
-                            img.indices[y * img.width + x]
+        val sortedAtlases = atlases.sortedBy { it.id }
+        val file = File(outputDir, "TEXTURES.BIN")
+        file.outputStream().use { out ->
+            for (atlas in sortedAtlases) {
+                atlasOffsets[atlas.id] = currentOffset
+
+                // Composite all entries into a single pixel index buffer
+                val canvas = ByteArray(atlas.width * atlas.height)
+                for (entry in atlas.entries) {
+                    val img = entry.image
+                    for (y in 0 until img.height) {
+                        for (x in 0 until img.width) {
+                            canvas[(entry.y + y) * atlas.width + (entry.x + x)] =
+                                img.indices[y * img.width + x]
+                        }
                     }
                 }
-            }
 
-            // Pack pixel data according to bpp
-            val pixelData: ByteArray
-            if (atlas.bpp == 4) {
-                // 4bpp: two pixels per byte (low nibble = even pixel, high nibble = odd pixel)
-                val packedSize = (atlas.width * atlas.height + 1) / 2
-                pixelData = ByteArray(packedSize)
-                for (i in canvas.indices step 2) {
-                    val lo = canvas[i].toInt() and 0x0F
-                    val hi = if (i + 1 < canvas.size) (canvas[i + 1].toInt() and 0x0F) shl 4 else 0
-                    pixelData[i / 2] = (lo or hi).toByte()
+                // Pack pixel data according to bpp
+                val pixelData: ByteArray
+                if (atlas.bpp == 4) {
+                    // 4bpp: two pixels per byte (low nibble = even pixel, high nibble = odd pixel)
+                    val packedSize = (atlas.width * atlas.height + 1) / 2
+                    pixelData = ByteArray(packedSize)
+                    for (i in canvas.indices step 2) {
+                        val lo = canvas[i].toInt() and 0x0F
+                        val hi = if (i + 1 < canvas.size) (canvas[i + 1].toInt() and 0x0F) shl 4 else 0
+                        pixelData[i / 2] = (lo or hi).toByte()
+                    }
+                } else {
+                    // 8bpp: one byte per pixel, already in the right format
+                    pixelData = canvas
                 }
-            } else {
-                // 8bpp: one byte per pixel, already in the right format
-                pixelData = canvas
+
+                // Build: 128-byte header + pixel data
+                val buf = ByteBuffer.allocate(headerSize + pixelData.size)
+                buf.order(ByteOrder.LITTLE_ENDIAN)
+
+                // Header
+                buf.put(0.toByte())                  // version
+                buf.putShort(atlas.width.toShort())   // width
+                buf.putShort(atlas.height.toShort())  // height
+                buf.put(atlas.bpp.toByte())           // bpp
+                buf.putInt(pixelData.size)            // pixelDataSize
+
+                // Pad the rest of the header to 128 bytes (already zeroed by allocate)
+                buf.position(headerSize)
+
+                // Pixel data
+                buf.put(pixelData)
+
+                out.write(buf.array())
+                val chunkSize = headerSize + pixelData.size
+                println("  Atlas #${atlas.id}: ${atlas.width}x${atlas.height} ${atlas.bpp}bpp, ${pixelData.size} bytes pixel data (offset $currentOffset)")
+                currentOffset += chunkSize
             }
-
-            // Build the file: 128-byte header + pixel data
-            val buf = ByteBuffer.allocate(headerSize + pixelData.size)
-            buf.order(ByteOrder.LITTLE_ENDIAN)
-
-            // Header
-            buf.put(0.toByte())                  // version
-            buf.putShort(atlas.width.toShort())   // width
-            buf.putShort(atlas.height.toShort())  // height
-            buf.put(atlas.bpp.toByte())           // bpp
-            buf.putInt(pixelData.size)            // pixelDataSize
-
-            // Pad the rest of the header to 128 bytes (already zeroed by allocate)
-            buf.position(headerSize)
-
-            // Pixel data
-            buf.put(pixelData)
-
-            val filename = "TEX${atlas.id}.BIN"
-            val file = File(outputDir, filename)
-            file.writeBytes(buf.array())
-            println("  $filename: ${atlas.width}x${atlas.height} ${atlas.bpp}bpp, ${pixelData.size} bytes pixel data")
         }
+        println("  TEXTURES.BIN: ${sortedAtlases.size} atlases, $currentOffset bytes total")
+
+        return atlasOffsets
     }
 
     private fun writeAtlasMetadata(
@@ -441,14 +452,17 @@ object ButterscotchPreprocessor {
         tpagIdxToImageName: Map<Int, String>,
         atlasEntryMap: Map<String, Pair<TextureAtlas, AtlasEntry>>,
         clutIndexMap: Map<String, Int>,
+        atlasOffsets: Map<Int, Long>,
         outputDir: File
     ) {
         val tpagCount = dw.tpag.items.size
         val tileCount = uniqueTiles.size
+        val atlasCount = atlasOffsets.size
         val tpagEntrySize = 13  // 6*uint16 + 1*uint8
         val tileEntrySize = 23  // 11*int16/uint16 + 1*uint8
-        val headerSize = 5
-        val totalSize = headerSize + tpagCount * tpagEntrySize + tileCount * tileEntrySize
+        val headerSize = 7     // version(1) + tpagEntryCount(2) + tileEntryCount(2) + atlasCount(2)
+        val atlasTableSize = atlasCount * 4  // u32 offset per atlas
+        val totalSize = headerSize + atlasTableSize + tpagCount * tpagEntrySize + tileCount * tileEntrySize
 
         val buf = ByteBuffer.allocate(totalSize)
         buf.order(ByteOrder.LITTLE_ENDIAN)
@@ -457,6 +471,12 @@ object ButterscotchPreprocessor {
         buf.put(0.toByte())                       // version
         buf.putShort(tpagCount.toShort())          // tpagEntryCount
         buf.putShort(tileCount.toShort())          // tileEntryCount
+        buf.putShort(atlasCount.toShort())         // atlasCount
+
+        // Atlas offset table (sorted by atlas id)
+        for (id in atlasOffsets.keys.sorted()) {
+            buf.putInt(atlasOffsets[id]!!.toInt())
+        }
 
         // TPAG entries
         var mappedTpagCount = 0
@@ -511,7 +531,7 @@ object ButterscotchPreprocessor {
 
         val file = File(outputDir, "ATLAS.BIN")
         file.writeBytes(buf.array())
-        println("  ATLAS.BIN: $tpagCount TPAG entries ($mappedTpagCount mapped), $tileCount tile entries, $totalSize bytes")
+        println("  ATLAS.BIN: $tpagCount TPAG entries ($mappedTpagCount mapped), $tileCount tile entries, $atlasCount atlas offsets, $totalSize bytes")
     }
 
     private fun extractFromTPAG(tpag: TexturePageItem, texturePages: List<BufferedImage?>): BufferedImage {
