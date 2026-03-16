@@ -36,6 +36,16 @@ class ButterscotchPreprocessorWebServer(
                             title("Butterscotch Preprocessor")
                             link(rel = "stylesheet", href = "/assets/css/style.css?v=$cssBundleHash")
                             script {
+                                defer = true
+                                attributes["data-domain"] = "butterscotch.mrpowergamerbr.com"
+                                src = "https://web-analytics.perfectdreams.net/js/script.tagged-events.js"
+                            }
+                            script {
+                                unsafe {
+                                    raw("""window.plausible = window.plausible || function() { (window.plausible.q = window.plausible.q || []).push(arguments) }""")
+                                }
+                            }
+                            script {
                                 attributes["async"] = "true"
                                 src = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
                             }

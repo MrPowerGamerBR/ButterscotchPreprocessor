@@ -16,6 +16,8 @@ import web.workers.Worker
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+private external fun plausible(eventName: String)
+
 // Detect if we are running inside a Web Worker (no document available)
 private val IS_WORKER = js("typeof document === 'undefined'") as Boolean
 
@@ -139,6 +141,7 @@ fun App() {
                                 val blob = Blob(arrayOf(isoBytes), BlobPropertyBag(type = "application/octet-stream"))
                                 downloadUrl = URL.createObjectURL(blob)
                                 status = "Done!"
+                                plausible("Generated PS2 ISO")
                             } catch (e: Exception) {
                                 status = "Error creating ISO: ${e.message}"
                                 logMessages = logMessages + "Error: ${e.stackTraceToString()}"
