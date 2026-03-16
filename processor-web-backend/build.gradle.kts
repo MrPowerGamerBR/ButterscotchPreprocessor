@@ -68,4 +68,5 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.compression)
     implementation(libs.kotlinx.html.jvm)
+    implementation("ch.qos.logback:logback-classic:1.5.32")
 }
