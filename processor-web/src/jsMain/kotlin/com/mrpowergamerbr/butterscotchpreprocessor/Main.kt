@@ -119,6 +119,9 @@ fun App() {
                                 // Fetch the butterscotch ELF from resources
                                 val elfBytes = fetchResourceBytes("/web/butterscotch.elf?v=${Date.now()}")
 
+                                // Fetch icon from resources
+                                val iconBytes = fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
+
                                 // Create SYSTEM.CNF content
                                 val systemCnf = "BOOT2 = cdrom0:\\BUTR_000.00;1\nVER = 1.00\nVMODE = NTSC\n"
 
@@ -135,6 +138,24 @@ fun App() {
                                     Iso9660Creator.IsoFile("CLUT8.BIN", clut8Bin),
                                     Iso9660Creator.IsoFile("TEXTURES.BIN", texturesBin),
                                     Iso9660Creator.IsoFile("ATLAS.BIN", atlasBin),
+                                    Iso9660Creator.IsoFile("CONFIG.JSN", """
+                                        {
+                                            "fileSystem": {
+                                                "file0": ["mc0:UNDERTALE/file0"],
+                                                "file9": ["mc0:UNDERTALE/file9"],
+                                                "undertale.ini": ["mc0:UNDERTALE/undertale.ini"],
+                                                "credits.txt": ["${'$'}BOOT:CREDITS.TXT"]
+                                            },
+                                            "saveIcon": {
+                                                "bgAlpha": 68,
+                                                "bgColors": [[255, 204, 0], [255, 204, 0], [180, 140, 0], [180, 140, 0]],
+                                                "lightDirs": [[0.5, 0.5, 0.5], [0.0, -0.4, -0.1], [-0.5, -0.5, 0.5]],
+                                                "lightColors": [[0.7, 0.7, 0.7], [0.5, 0.5, 0.5], [0.3, 0.3, 0.3]],
+                                                "ambient": [1.0, 0.8, 0.0]
+                                            }
+                                        }
+                                    """.trimIndent().encodeToByteArray()),
+                                    Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
                                 ))
 
                                 isoFileName = "${gameName}.iso"
