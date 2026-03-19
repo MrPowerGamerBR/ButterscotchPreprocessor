@@ -70,6 +70,10 @@ object BinToPngConverter {
         val atlasY: Int,
         val width: Int,
         val height: Int,
+        val cropX: Int,
+        val cropY: Int,
+        val cropW: Int,
+        val cropH: Int,
         val clutIndex: Int,
         val bpp: Int
     )
@@ -144,25 +148,35 @@ object BinToPngConverter {
         val version = buf.get().toInt() and 0xFF
         val tpagCount = buf.getShort().toInt() and 0xFFFF
         val tileCount = buf.getShort().toInt() and 0xFFFF
+        val atlasCount = buf.getShort().toInt() and 0xFFFF
+
+        // Skip atlas offset table
+        for (i in 0 until atlasCount) {
+            buf.getInt()
+        }
 
         val entries = mutableListOf<AtlasEntryInfo>()
 
-        // Read TPAG entries (13 bytes each)
+        // Read TPAG entries (21 bytes each)
         for (i in 0 until tpagCount) {
             val atlasId = buf.getShort().toInt() and 0xFFFF
             val atlasX = buf.getShort().toInt() and 0xFFFF
             val atlasY = buf.getShort().toInt() and 0xFFFF
             val width = buf.getShort().toInt() and 0xFFFF
             val height = buf.getShort().toInt() and 0xFFFF
+            val cropX = buf.getShort().toInt() and 0xFFFF
+            val cropY = buf.getShort().toInt() and 0xFFFF
+            val cropW = buf.getShort().toInt() and 0xFFFF
+            val cropH = buf.getShort().toInt() and 0xFFFF
             val clutIndex = buf.getShort().toInt() and 0xFFFF
             val bpp = buf.get().toInt() and 0xFF
 
             if (atlasId != 0xFFFF) {
-                entries.add(AtlasEntryInfo(atlasId, atlasX, atlasY, width, height, clutIndex, bpp))
+                entries.add(AtlasEntryInfo(atlasId, atlasX, atlasY, width, height, cropX, cropY, cropW, cropH, clutIndex, bpp))
             }
         }
 
-        // Read tile entries (23 bytes each)
+        // Read tile entries (31 bytes each)
         for (i in 0 until tileCount) {
             buf.getShort() // bgDef - skip
             buf.getShort() // srcX - skip
@@ -174,15 +188,19 @@ object BinToPngConverter {
             val atlasY = buf.getShort().toInt() and 0xFFFF
             val width = buf.getShort().toInt() and 0xFFFF
             val height = buf.getShort().toInt() and 0xFFFF
+            val cropX = buf.getShort().toInt() and 0xFFFF
+            val cropY = buf.getShort().toInt() and 0xFFFF
+            val cropW = buf.getShort().toInt() and 0xFFFF
+            val cropH = buf.getShort().toInt() and 0xFFFF
             val clutIndex = buf.getShort().toInt() and 0xFFFF
             val bpp = buf.get().toInt() and 0xFF
 
             if (atlasId != 0xFFFF) {
-                entries.add(AtlasEntryInfo(atlasId, atlasX, atlasY, width, height, clutIndex, bpp))
+                entries.add(AtlasEntryInfo(atlasId, atlasX, atlasY, width, height, cropX, cropY, cropW, cropH, clutIndex, bpp))
             }
         }
 
-        println("Loaded ATLAS.BIN: $tpagCount TPAG entries, $tileCount tile entries, ${entries.size} mapped")
+        println("Loaded ATLAS.BIN: $tpagCount TPAG entries, $tileCount tile entries, $atlasCount atlases, ${entries.size} mapped")
         return entries
     }
 

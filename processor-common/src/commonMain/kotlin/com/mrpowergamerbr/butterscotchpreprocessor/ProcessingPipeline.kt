@@ -5,10 +5,12 @@ class ProcessingResult(
     val clut4Bin: ByteArray,
     val clut8Bin: ByteArray,
     val texturesBin: ByteArray,
-    val atlasBin: ByteArray
+    val atlasBin: ByteArray,
+    val atlases: List<TextureAtlas> = emptyList()
 )
 
 private data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
+private data class CropInfo(val offsetX: Int, val offsetY: Int, val croppedWidth: Int, val croppedHeight: Int)
 
 suspend fun processDataWin(
     dataWinBytes: ByteArray,
@@ -129,6 +131,27 @@ suspend fun processDataWin(
         atlasGroupKeys[imgName] = imgName
     }
 
+    // Crop transparent borders before packing (sprites only)
+    val cropInfoMap = HashMap<String, CropInfo>()
+    var croppedCount = 0
+    for (i in allImages.indices) {
+        val (name, img) = allImages[i]
+        if (name.startsWith("spr/")) {
+            val crop = cropTransparentBorders(img)
+            cropInfoMap[name] = CropInfo(crop.offsetX, crop.offsetY, crop.image.width, crop.image.height)
+            if (crop.image.width != img.width || crop.image.height != img.height) {
+                croppedCount++
+            }
+            allImages[i] = name to crop.image
+        } else {
+            // No crop: store original dimensions for correct cropW/cropH in ATLAS.BIN
+            cropInfoMap[name] = CropInfo(0, 0, img.width, img.height)
+        }
+    }
+    if (croppedCount > 0) {
+        log("Cropped transparent borders from $croppedCount sprite images")
+    }
+
     // Resize any images exceeding 512x512
     val maxDim = 512
     var resizedCount = 0
@@ -217,10 +240,10 @@ suspend fun processDataWin(
         tpagIdxToImageName[tpagIdx] = imgName
     }
 
-    val atlasBin = writeAtlasMetadataBytes(dw, uniqueTiles, tpagIdxToImageName, atlasEntryMap, clutIndexMap, atlasOffsets)
+    val atlasBin = writeAtlasMetadataBytes(dw, uniqueTiles, tpagIdxToImageName, atlasEntryMap, clutIndexMap, atlasOffsets, cropInfoMap)
 
     log("Done!")
-    return ProcessingResult(dw.gen8.displayName ?: dw.gen8.name ?: "GAME", clut4Bin, clut8Bin, texturesBin, atlasBin)
+    return ProcessingResult(dw.gen8.displayName ?: dw.gen8.name ?: "GAME", clut4Bin, clut8Bin, texturesBin, atlasBin, atlases)
 }
 
 // Pure pixel copy from a TPAG item (replaces Graphics2D.drawImage)
@@ -368,7 +391,8 @@ private fun writeAtlasMetadataBytes(
     tpagIdxToImageName: Map<Int, String>,
     atlasEntryMap: Map<String, Pair<TextureAtlas, AtlasEntry>>,
     clutIndexMap: Map<String, Int>,
-    atlasOffsets: Map<Int, Long>
+    atlasOffsets: Map<Int, Long>,
+    cropInfoMap: Map<String, CropInfo>
 ): ByteArray {
     val tpagCount = dw.tpag.items.size
     val tileCount = uniqueTiles.size
@@ -399,6 +423,11 @@ private fun writeAtlasMetadataBytes(
                 writer.writeShortLE(entry.y)                // atlasY
                 writer.writeShortLE(entry.image.width)      // width
                 writer.writeShortLE(entry.image.height)     // height
+                val crop = cropInfoMap[imgName]
+                writer.writeShortLE(crop?.offsetX ?: 0)     // cropX
+                writer.writeShortLE(crop?.offsetY ?: 0)     // cropY
+                writer.writeShortLE(crop?.croppedWidth ?: entry.image.width)  // cropW
+                writer.writeShortLE(crop?.croppedHeight ?: entry.image.height) // cropH
                 writer.writeShortLE(clutIndexMap[imgName] ?: 0) // clutIndex
                 writer.writeByte(atlas.bpp)                 // bpp
                 continue
@@ -410,6 +439,10 @@ private fun writeAtlasMetadataBytes(
         writer.writeShortLE(0)       // atlasY
         writer.writeShortLE(0)       // width
         writer.writeShortLE(0)       // height
+        writer.writeShortLE(0)       // cropX
+        writer.writeShortLE(0)       // cropY
+        writer.writeShortLE(0)       // cropW
+        writer.writeShortLE(0)       // cropH
         writer.writeShortLE(0)       // clutIndex
         writer.writeByte(0)          // bpp
     }
@@ -432,6 +465,11 @@ private fun writeAtlasMetadataBytes(
         writer.writeShortLE(entry?.y ?: 0)                          // atlasY
         writer.writeShortLE(entry?.image?.width ?: 0)               // width
         writer.writeShortLE(entry?.image?.height ?: 0)              // height
+        val crop = cropInfoMap[imgName]
+        writer.writeShortLE(crop?.offsetX ?: 0)                    // cropX
+        writer.writeShortLE(crop?.offsetY ?: 0)                    // cropY
+        writer.writeShortLE(crop?.croppedWidth ?: (entry?.image?.width ?: 0))  // cropW
+        writer.writeShortLE(crop?.croppedHeight ?: (entry?.image?.height ?: 0)) // cropH
         writer.writeShortLE(clutIndexMap[imgName] ?: 0)             // clutIndex
         writer.writeByte(atlas?.bpp ?: 0)                           // bpp
     }

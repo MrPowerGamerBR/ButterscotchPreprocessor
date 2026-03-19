@@ -36,6 +36,15 @@ object ButterscotchPreprocessor {
         File(outputDir, "TEXTURES.BIN").writeBytes(result.texturesBin)
         File(outputDir, "ATLAS.BIN").writeBytes(result.atlasBin)
 
+        // Dump debug atlas images
+        val atlasDebugDir = File(outputDir, "atlas_debug")
+        atlasDebugDir.mkdirs()
+        for (atlas in result.atlases) {
+            val debugImg = renderAtlasDebug(atlas)
+            ImageIO.write(debugImg, "PNG", File(atlasDebugDir, "atlas_${atlas.id}_${atlas.bpp}bpp.png"))
+        }
+        println("  Dumped ${result.atlases.size} debug atlas images to ${atlasDebugDir.path}")
+
         println("\nAll files written to ${outputDir.path}")
         println("Done!")
     }
