@@ -6,7 +6,16 @@ class ProcessingResult(
     val clut8Bin: ByteArray,
     val texturesBin: ByteArray,
     val atlasBin: ByteArray,
+    val soundBnkBin: ByteArray,
+    val soundsBin: ByteArray,
     val atlases: List<TextureAtlas> = emptyList()
+)
+
+private class WavData(
+    val sampleRate: Int,
+    val channels: Int,
+    val bitsPerSample: Int,
+    val pcmData: ByteArray
 )
 
 private data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
@@ -14,6 +23,7 @@ private data class CropInfo(val offsetX: Int, val offsetY: Int, val croppedWidth
 
 suspend fun processDataWin(
     dataWinBytes: ByteArray,
+    externalAudioFiles: Map<String, ByteArray> = emptyMap(),
     progressCallback: ((String) -> Unit)? = null
 ): ProcessingResult {
     val log = progressCallback ?: {}
@@ -24,7 +34,7 @@ suspend fun processDataWin(
         parseOptn = false,
         parseLang = false,
         parseExtn = false,
-        parseSond = false,
+        parseSond = true,
         parseAgrp = false,
         parseSprt = true,
         parseBgnd = true,
@@ -42,7 +52,7 @@ suspend fun processDataWin(
         parseFunc = false,
         parseStrg = true,
         parseTxtr = true,
-        parseAudo = false,
+        parseAudo = true,
         skipLoadingPreciseMasksForNonPreciseSprites = true
     ))
 
@@ -242,8 +252,102 @@ suspend fun processDataWin(
 
     val atlasBin = writeAtlasMetadataBytes(dw, uniqueTiles, tpagIdxToImageName, atlasEntryMap, clutIndexMap, atlasOffsets, cropInfoMap)
 
+    // Step 8: Process sounds
+    log("Processing sounds...")
+
+    log("Decoding embedded audio files...")
+
+    // Decode embedded AUDO entries (WAV or OGG)
+    val parsedAudio = dw.audo.entries.map { entry ->
+        if (entry.data != null) (parseWav(entry.data) ?: parseOgg(entry.data)) else null
+    }.toMutableList()
+    val embeddedCount = parsedAudio.count { it != null }
+
+    // Resolve non-embedded sounds from external audio files
+    // These get appended as new AUDO entries at the end of the list
+    val externalAudoMap = HashMap<Int, Int>() // sondIndex -> new audoIndex
+    var externalCount = 0
+    log("Decoding non-embedded audio files...")
+    for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
+        val isEmbedded = (sound.flags and 0x01) != 0
+        if (isEmbedded)
+            continue
+
+        // Non-embedded audio files DO have an entry on the AUDO chunk, but we will ignore them because they are bogus entries
+
+        val fileName = sound.file ?: continue
+        log("Decoding ${sound.file}...")
+        val fileData = externalAudioFiles[fileName] ?: externalAudioFiles["$fileName.ogg"] ?: externalAudioFiles["$fileName.wav"] ?: continue
+
+        val decoded = parseWav(fileData) ?: parseOgg(fileData)
+        if (decoded != null) {
+            val newAudoIndex = parsedAudio.size
+            parsedAudio.add(decoded)
+            externalAudoMap[sondIdx] = newAudoIndex
+            externalCount++
+        }
+    }
+
+    val totalDecoded = parsedAudio.count { it != null }
+    val failedCount = parsedAudio.size - totalDecoded
+    log("  $embeddedCount embedded + $externalCount external = $totalDecoded decoded sounds, $failedCount failed or empty")
+
+    // Build SOUNDS.BIN (raw PCM data concatenated)
+    val soundsWriter = ByteWriter()
+    val audioOffsets = IntArray(parsedAudio.size)
+    val audioSizes = IntArray(parsedAudio.size)
+    for ((i, wav) in parsedAudio.withIndex()) {
+        if (wav != null) {
+            audioOffsets[i] = soundsWriter.size
+            audioSizes[i] = wav.pcmData.size
+            soundsWriter.writeByteArray(wav.pcmData)
+        }
+    }
+    val soundsBin = soundsWriter.getAsByteArray()
+    log("  SOUNDS.BIN: ${soundsBin.size} bytes of raw PCM")
+
+    // Build SOUNDBNK.BIN
+    val soundBnkWriter = ByteWriter()
+    // Header (5 bytes)
+    soundBnkWriter.writeByte(0)                                    // version
+    soundBnkWriter.writeShortLE(dw.sond.sounds.size)               // sondEntryCount
+    soundBnkWriter.writeShortLE(parsedAudio.size)                  // audoEntryCount
+
+    // SOND entries (12 bytes each)
+    for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
+        // Use the external mapping if available, otherwise use the original audioFile index
+        val audoIndex = externalAudoMap[sondIdx]
+            ?: if (0 > sound.audioFile || sound.audioFile >= parsedAudio.size) 0xFFFF else sound.audioFile
+        soundBnkWriter.writeShortLE(audoIndex)                     // audoIndex
+        soundBnkWriter.writeIntLE(sound.flags)                     // flags
+        soundBnkWriter.writeShortLE((sound.volume * 256).toInt())  // volume (fixed-point)
+        soundBnkWriter.writeShortLE((sound.pitch * 256).toInt())   // pitch (fixed-point)
+        soundBnkWriter.writeShortLE(0)                             // reserved
+    }
+
+    // AUDO entries (16 bytes each)
+    for ((i, wav) in parsedAudio.withIndex()) {
+        if (wav != null) {
+            soundBnkWriter.writeIntLE(audioOffsets[i])             // dataOffset
+            soundBnkWriter.writeIntLE(audioSizes[i])               // dataSize
+            soundBnkWriter.writeShortLE(wav.sampleRate)            // sampleRate
+            soundBnkWriter.writeByte(wav.channels)                 // channels
+            soundBnkWriter.writeByte(wav.bitsPerSample)            // bitsPerSample
+            soundBnkWriter.writeIntLE(0)                           // reserved
+        } else {
+            // Unmapped entry
+            soundBnkWriter.writeIntLE(0)                           // dataOffset
+            soundBnkWriter.writeIntLE(0)                           // dataSize
+            soundBnkWriter.writeShortLE(0)                         // sampleRate
+            soundBnkWriter.writeByte(0)                            // channels
+            soundBnkWriter.writeByte(0)                            // bitsPerSample
+            soundBnkWriter.writeIntLE(0)                           // reserved
+        }
+    }
+    val soundBnkBin = soundBnkWriter.getAsByteArray()
+
     log("Done!")
-    return ProcessingResult(dw.gen8.displayName ?: dw.gen8.name ?: "GAME", clut4Bin, clut8Bin, texturesBin, atlasBin, atlases)
+    return ProcessingResult(dw.gen8.displayName ?: dw.gen8.name ?: "GAME", clut4Bin, clut8Bin, texturesBin, atlasBin, soundBnkBin, soundsBin, atlases)
 }
 
 // Pure pixel copy from a TPAG item (replaces Graphics2D.drawImage)
@@ -510,4 +614,100 @@ private fun writeAtlasMetadataBytes(
     }
 
     return writer.getAsByteArray()
+}
+
+// Parse a WAV file and extract raw PCM data. Returns null for non-WAV (e.g. OGG) or non-PCM formats.
+private fun parseWav(data: ByteArray): WavData? {
+    if (4 > data.size) return null
+
+    // Check RIFF magic
+    if (data[0] != 'R'.code.toByte() || data[1] != 'I'.code.toByte() ||
+        data[2] != 'F'.code.toByte() || data[3] != 'F'.code.toByte()) return null
+
+    // Check WAVE format at offset 8
+    if (12 > data.size) return null
+    if (data[8] != 'W'.code.toByte() || data[9] != 'A'.code.toByte() ||
+        data[10] != 'V'.code.toByte() || data[11] != 'E'.code.toByte()) return null
+
+    var pos = 12
+    var sampleRate = 0
+    var channels = 0
+    var bitsPerSample = 0
+    var pcmData: ByteArray? = null
+    var foundFmt = false
+
+    // Walk through chunks
+    while (data.size >= pos + 8) {
+        val chunkId = ByteArray(4) { data[pos + it] }.decodeToString()
+        val chunkSize = readIntLE(data, pos + 4)
+        pos += 8
+
+        when (chunkId) {
+            "fmt " -> {
+                if (pos + 16 > data.size) return null
+                val audioFormat = readShortLE(data, pos)
+                // Only PCM (format 1) is supported
+                if (audioFormat != 1) return null
+                channels = readShortLE(data, pos + 2)
+                sampleRate = readIntLE(data, pos + 4)
+                bitsPerSample = readShortLE(data, pos + 14)
+                foundFmt = true
+            }
+            "data" -> {
+                val dataEnd = minOf(pos + chunkSize, data.size)
+                pcmData = data.copyOfRange(pos, dataEnd)
+            }
+        }
+
+        pos += chunkSize
+        // Chunks are word-aligned
+        if (pos % 2 != 0) pos++
+    }
+
+    if (!foundFmt || pcmData == null) return null
+    return WavData(sampleRate, channels, bitsPerSample, pcmData)
+}
+
+private fun readShortLE(data: ByteArray, offset: Int): Int {
+    return (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8)
+}
+
+private fun readIntLE(data: ByteArray, offset: Int): Int {
+    return (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8) or
+            ((data[offset + 2].toInt() and 0xFF) shl 16) or
+            ((data[offset + 3].toInt() and 0xFF) shl 24)
+}
+
+// Decode an OGG Vorbis file to raw 16-bit PCM data. Returns null on failure.
+private fun parseOgg(data: ByteArray): WavData? {
+    val (vorbis, error) = StbVorbis.openMemory(data)
+    if (vorbis == null) return null
+
+    val info = vorbis.getInfo()
+    val totalSamples = vorbis.streamLengthInSamples()
+    if (totalSamples == 0) {
+        vorbis.close()
+        return null
+    }
+
+    // Decode all samples as interleaved floats
+    val floatBuf = FloatArray(totalSamples * info.channels)
+    val decoded = vorbis.getSamplesFloatInterleaved(info.channels, floatBuf, floatBuf.size)
+    vorbis.close()
+
+    if (decoded == 0) return null
+
+    // Convert float samples to 16-bit signed PCM
+    val totalFloats = decoded * info.channels
+    val pcmData = ByteArray(totalFloats * 2)
+    for (i in 0 until totalFloats) {
+        val clamped = floatBuf[i].coerceIn(-1.0f, 1.0f)
+        val sample = (clamped * 32767.0f).toInt().toShort()
+        pcmData[i * 2] = (sample.toInt() and 0xFF).toByte()
+        pcmData[i * 2 + 1] = (sample.toInt() shr 8 and 0xFF).toByte()
+    }
+
+    return WavData(info.sampleRate, info.channels, 16, pcmData)
 }

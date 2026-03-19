@@ -16,18 +16,23 @@ object ButterscotchPreprocessor {
         }
 
         val dataWinPath = args[0]
+        val dataWinFile = File(dataWinPath)
         println("Parsing $dataWinPath...")
 
-        val bytes = File(dataWinPath).readBytes()
+        val bytes = dataWinFile.readBytes()
+        val dataWinDir = dataWinFile.parentFile ?: File(".")
         val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/build-ps2/")
         outputDir.mkdirs()
 
         // Debug dumps (JVM-only, using ImageIO)
         dumpDebugImages(bytes, outputDir)
 
+        // Load external audio files from the same directory as data.win
+        val externalAudioFiles = loadExternalAudioFiles(dataWinDir)
+
         // Core processing via common pipeline
         val result = runBlocking {
-            processDataWin(bytes) { println(it) }
+            processDataWin(bytes, externalAudioFiles) { println(it) }
         }
 
         // Write output files
@@ -35,6 +40,8 @@ object ButterscotchPreprocessor {
         File(outputDir, "CLUT8.BIN").writeBytes(result.clut8Bin)
         File(outputDir, "TEXTURES.BIN").writeBytes(result.texturesBin)
         File(outputDir, "ATLAS.BIN").writeBytes(result.atlasBin)
+        File(outputDir, "SOUNDBNK.BIN").writeBytes(result.soundBnkBin)
+        File(outputDir, "SOUNDS.BIN").writeBytes(result.soundsBin)
 
         // Dump debug atlas images
         val atlasDebugDir = File(outputDir, "atlas_debug")
@@ -55,7 +62,7 @@ object ButterscotchPreprocessor {
             parseOptn = false,
             parseLang = false,
             parseExtn = false,
-            parseSond = false,
+            parseSond = true,
             parseAgrp = false,
             parseSprt = true,
             parseBgnd = true,
@@ -73,7 +80,7 @@ object ButterscotchPreprocessor {
             parseFunc = false,
             parseStrg = true,
             parseTxtr = true,
-            parseAudo = false,
+            parseAudo = true,
             skipLoadingPreciseMasksForNonPreciseSprites = true
         ))
 
@@ -208,6 +215,22 @@ object ButterscotchPreprocessor {
             count++
         }
         println("  Dumped $count unique tiles to ${tilesDir.path}")
+    }
+
+    // Scan a directory for audio files (OGG, WAV) and load them into a map keyed by filename
+    private fun loadExternalAudioFiles(dir: File): Map<String, ByteArray> {
+        val result = HashMap<String, ByteArray>()
+        val files = dir.listFiles() ?: return result
+        for (file in files) {
+            val name = file.name.lowercase()
+            if (name.endsWith(".ogg") || name.endsWith(".wav")) {
+                result[file.name] = file.readBytes()
+            }
+        }
+        if (result.isNotEmpty()) {
+            println("Found ${result.size} external audio files in ${dir.path}")
+        }
+        return result
     }
 
     // Render an atlas to a BufferedImage for debugging/verification

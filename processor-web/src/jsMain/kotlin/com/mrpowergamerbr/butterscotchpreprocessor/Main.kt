@@ -47,9 +47,18 @@ private fun workerMain() {
                 val arrayBuffer: dynamic = msg.data
                 val bytes = js("new Int8Array(arrayBuffer)").unsafeCast<ByteArray>()
 
+                // Receive external audio files
+                val externalAudioObj: dynamic = msg.externalAudio
+                val externalAudioFiles = HashMap<String, ByteArray>()
+                val keys = js("Object.keys(externalAudioObj)").unsafeCast<Array<String>>()
+                for (key in keys) {
+                    val audioData = externalAudioObj[key]
+                    externalAudioFiles[key] = js("new Int8Array(audioData)").unsafeCast<ByteArray>()
+                }
+
                 scope.launch {
                     try {
-                        val result = processDataWin(bytes) { progressMsg ->
+                        val result = processDataWin(bytes, externalAudioFiles) { progressMsg ->
                             self.postMessage(jsObject("type" to "progress", "message" to progressMsg))
                         }
 
@@ -61,6 +70,8 @@ private fun workerMain() {
                         resultMsg.clut8 = result.clut8Bin
                         resultMsg.textures = result.texturesBin
                         resultMsg.atlas = result.atlasBin
+                        resultMsg.soundBnk = result.soundBnkBin
+                        resultMsg.sounds = result.soundsBin
                         self.postMessage(resultMsg)
                     } catch (e: Exception) {
                         self.postMessage(jsObject("type" to "error", "message" to (e.message ?: "Unknown error")))
@@ -83,12 +94,13 @@ private fun jsObject(vararg pairs: Pair<String, Any?>): dynamic {
 
 @Composable
 fun App() {
-    var status by remember { mutableStateOf("Select a data.win file to begin!") }
+    var status by remember { mutableStateOf("Select the game's folder to begin!") }
     var logMessages by remember { mutableStateOf(listOf<String>()) }
     var downloadUrl by remember { mutableStateOf<String?>(null) }
     var isoFileName by remember { mutableStateOf("output.iso") }
     var processing by remember { mutableStateOf(false) }
     var loadedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var loadedExternalAudio by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -113,6 +125,8 @@ fun App() {
                                 val clut8Bin = jsInt8ArrayToByteArray(msg.clut8)
                                 val texturesBin = jsInt8ArrayToByteArray(msg.textures)
                                 val atlasBin = jsInt8ArrayToByteArray(msg.atlas)
+                                val soundBnkBin = jsInt8ArrayToByteArray(msg.soundBnk)
+                                val soundsBin = jsInt8ArrayToByteArray(msg.sounds)
 
                                 val dataWinBytes = loadedFileBytes!!
 
@@ -138,6 +152,8 @@ fun App() {
                                     Iso9660Creator.IsoFile("CLUT8.BIN", clut8Bin),
                                     Iso9660Creator.IsoFile("TEXTURES.BIN", texturesBin),
                                     Iso9660Creator.IsoFile("ATLAS.BIN", atlasBin),
+                                    Iso9660Creator.IsoFile("SOUNDBNK.BIN", soundBnkBin),
+                                    Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
                                     Iso9660Creator.IsoFile("CONFIG.JSN", """
                                         {
                                             "fileSystem": {
@@ -187,22 +203,53 @@ fun App() {
 
     if (!processing) {
         Input(type = org.jetbrains.compose.web.attributes.InputType.File) {
-            attr("accept", ".win, .osx, .unx")
+            attr("webkitdirectory", "")
             onChange { event ->
                 val input: dynamic = event.target
                 val files: dynamic = input.files
                 if (files == null || files.length == 0) return@onChange
-                val file: dynamic = files[0]
 
                 downloadUrl = null
                 logMessages = listOf()
                 parsedGameName = null
-                status = "Reading file..."
+                loadedExternalAudio = emptyMap()
+                status = "Reading folder..."
 
                 scope.launch {
                     try {
-                        val bytes = readFileAsBytes(file)
+                        // Find the data.win file and collect audio files
+                        var dataWinFile: dynamic = null
+                        val audioFiles = HashMap<String, dynamic>()
+                        val fileCount = files.length as Int
+
+                        for (i in 0 until fileCount) {
+                            val file: dynamic = files[i]
+                            val name = (file.name as String).lowercase()
+                            if (name.endsWith(".win") || name.endsWith(".unx") || name.endsWith(".osx")) {
+                                dataWinFile = file
+                            } else if (name.endsWith(".ogg") || name.endsWith(".wav")) {
+                                audioFiles[file.name as String] = file
+                            }
+                        }
+
+                        if (dataWinFile == null) {
+                            status = "No data.win file found in the selected folder!"
+                            return@launch
+                        }
+
+                        status = "Reading data.win..."
+                        val bytes = readFileAsBytes(dataWinFile)
                         loadedFileBytes = bytes
+
+                        // Load external audio files
+                        if (audioFiles.isNotEmpty()) {
+                            status = "Reading ${audioFiles.size} audio files..."
+                            val externalAudio = HashMap<String, ByteArray>()
+                            for ((fileName, file) in audioFiles) {
+                                externalAudio[fileName] = readFileAsBytes(file)
+                            }
+                            loadedExternalAudio = externalAudio
+                        }
 
                         // Quick parse to get game name
                         val dw = DataWin.parse(bytes, DataWinParserOptions(
@@ -233,10 +280,12 @@ fun App() {
 
                         val gameName = dw.gen8.displayName ?: dw.gen8.name ?: "Unknown"
                         parsedGameName = gameName
-                        status = "Game: $gameName"
+                        val audioMsg = if (audioFiles.isNotEmpty()) " (${audioFiles.size} audio files)" else ""
+                        status = "Game: $gameName$audioMsg"
                     } catch (e: Exception) {
-                        status = "Error reading file: ${e.message}"
+                        status = "Error reading folder: ${e.message}"
                         loadedFileBytes = null
+                        loadedExternalAudio = emptyMap()
                     }
                 }
             }
@@ -257,8 +306,15 @@ fun App() {
                     logMessages = listOf()
                     status = "Processing..."
 
+                    // Build external audio map as a JS object for the worker
+                    val externalAudio = loadedExternalAudio
+                    val audioObj: dynamic = js("{}")
+                    for ((name, data) in externalAudio) {
+                        audioObj[name] = data
+                    }
+
                     // Send data to worker (no transfer - we need the bytes later for the ISO)
-                    worker.asDynamic().postMessage(jsObject("type" to "process", "data" to bytes))
+                    worker.asDynamic().postMessage(jsObject("type" to "process", "data" to bytes, "externalAudio" to audioObj))
                 }
             }) {
                 Text("Generate PlayStation 2 ISO")
