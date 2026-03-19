@@ -214,7 +214,7 @@ suspend fun processDataWin(
 
     // Step 6: Write texture pages
     log("Writing texture pages...")
-    val (texturesBin, atlasOffsets) = writeTexturePagesBytes(atlases)
+    val (texturesBin, atlasOffsets) = writeTexturePagesBytes(atlases, log)
 
     // Step 7: Build lookups and write ATLAS.BIN
     log("Writing ATLAS.BIN...")
@@ -330,7 +330,25 @@ private fun writeClutBinary(groups: List<ClutGroup>, paletteSize: Int): ByteArra
     return writer.getAsByteArray()
 }
 
-private fun writeTexturePagesBytes(atlases: List<TextureAtlas>): Pair<ByteArray, Map<Int, Long>> {
+private fun rleCompress(data: ByteArray): ByteArray {
+    if (data.isEmpty()) return ByteArray(0)
+
+    val writer = ByteWriter(data.size)
+    var i = 0
+    while (data.size > i) {
+        val current = data[i]
+        var runLength = 1
+        while (data.size > i + runLength && runLength < 255 && data[i + runLength] == current) {
+            runLength++
+        }
+        writer.writeByte(runLength)
+        writer.writeByte(current.toInt() and 0xFF)
+        i += runLength
+    }
+    return writer.getAsByteArray()
+}
+
+private fun writeTexturePagesBytes(atlases: List<TextureAtlas>, log: (String) -> Unit): Pair<ByteArray, Map<Int, Long>> {
     val headerSize = 128
     val atlasOffsets = HashMap<Int, Long>()
     var currentOffset = 0L
@@ -354,17 +372,33 @@ private fun writeTexturePagesBytes(atlases: List<TextureAtlas>): Pair<ByteArray,
         }
 
         // Pack pixel data according to bpp
-        val pixelData: ByteArray
+        val uncompressedPixelData: ByteArray
         if (atlas.bpp == 4) {
             val packedSize = (atlas.width * atlas.height + 1) / 2
-            pixelData = ByteArray(packedSize)
+            uncompressedPixelData = ByteArray(packedSize)
             for (i in canvas.indices step 2) {
                 val lo = canvas[i].toInt() and 0x0F
                 val hi = if (i + 1 < canvas.size) (canvas[i + 1].toInt() and 0x0F) shl 4 else 0
-                pixelData[i / 2] = (lo or hi).toByte()
+                uncompressedPixelData[i / 2] = (lo or hi).toByte()
             }
         } else {
-            pixelData = canvas
+            uncompressedPixelData = canvas
+        }
+
+        // Try RLE compression
+        val rleData = rleCompress(uncompressedPixelData)
+        val useRle = uncompressedPixelData.size > rleData.size
+        val compressionType: Int
+        val pixelData: ByteArray
+
+        if (useRle) {
+            compressionType = 1
+            pixelData = rleData
+            log("  Atlas ${atlas.id} (${atlas.bpp}bpp): RLE compressed ${uncompressedPixelData.size} -> ${rleData.size} bytes (saved ${uncompressedPixelData.size - rleData.size} bytes, ${(100.0 * (uncompressedPixelData.size - rleData.size) / uncompressedPixelData.size).toInt()}%)")
+        } else {
+            compressionType = 0
+            pixelData = uncompressedPixelData
+            log("  Atlas ${atlas.id} (${atlas.bpp}bpp): RLE not beneficial (${uncompressedPixelData.size} -> ${rleData.size} bytes), keeping uncompressed")
         }
 
         // Header (128 bytes)
@@ -373,8 +407,9 @@ private fun writeTexturePagesBytes(atlases: List<TextureAtlas>): Pair<ByteArray,
         writer.writeShortLE(atlas.height)            // height
         writer.writeByte(atlas.bpp)                  // bpp
         writer.writeIntLE(pixelData.size)            // pixelDataSize
-        // Pad to 128 bytes (we wrote 1+2+2+1+4 = 10 bytes so far)
-        writer.writeZeroPadding(headerSize - 10)
+        writer.writeByte(compressionType)            // compressionType (0 = uncompressed, 1 = RLE)
+        // Pad to 128 bytes (we wrote 1+2+2+1+4+1 = 11 bytes so far)
+        writer.writeZeroPadding(headerSize - 11)
 
         // Pixel data
         writer.writeByteArray(pixelData)
