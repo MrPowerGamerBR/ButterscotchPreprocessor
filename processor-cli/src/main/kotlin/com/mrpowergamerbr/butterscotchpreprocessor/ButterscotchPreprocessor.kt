@@ -21,7 +21,7 @@ object ButterscotchPreprocessor {
 
         val bytes = dataWinFile.readBytes()
         val dataWinDir = dataWinFile.parentFile ?: File(".")
-        val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/build-ps2/")
+        val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/build-ps2/ISOTest/")
         outputDir.mkdirs()
 
         // Debug dumps (JVM-only, using ImageIO)

@@ -11,11 +11,15 @@ class ProcessingResult(
     val atlases: List<TextureAtlas> = emptyList()
 )
 
-private class WavData(
+private const val AUDIO_FORMAT_PCM = 0
+private const val AUDIO_FORMAT_ADPCM = 1
+
+private class AudioData(
+    val format: Int,         // AUDIO_FORMAT_PCM or AUDIO_FORMAT_ADPCM
     val sampleRate: Int,
     val channels: Int,
-    val bitsPerSample: Int,
-    val pcmData: ByteArray
+    val bitsPerSample: Int,  // Only meaningful for PCM (8 or 16)
+    val data: ByteArray      // Raw PCM, raw OGG, or ADPCM encoded data
 )
 
 private data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
@@ -292,19 +296,21 @@ suspend fun processDataWin(
     val failedCount = parsedAudio.size - totalDecoded
     log("  $embeddedCount embedded + $externalCount external = $totalDecoded decoded sounds, $failedCount failed or empty")
 
-    // Build SOUNDS.BIN (raw PCM data concatenated)
+    // Build SOUNDS.BIN (PCM data and raw OGG files concatenated)
     val soundsWriter = ByteWriter()
     val audioOffsets = IntArray(parsedAudio.size)
     val audioSizes = IntArray(parsedAudio.size)
-    for ((i, wav) in parsedAudio.withIndex()) {
-        if (wav != null) {
+    for ((i, audio) in parsedAudio.withIndex()) {
+        if (audio != null) {
             audioOffsets[i] = soundsWriter.size
-            audioSizes[i] = wav.pcmData.size
-            soundsWriter.writeByteArray(wav.pcmData)
+            audioSizes[i] = audio.data.size
+            soundsWriter.writeByteArray(audio.data)
         }
     }
     val soundsBin = soundsWriter.getAsByteArray()
-    log("  SOUNDS.BIN: ${soundsBin.size} bytes of raw PCM")
+    val pcmCount = parsedAudio.count { it != null && it.format == AUDIO_FORMAT_PCM }
+    val adpcmCount = parsedAudio.count { it != null && it.format == AUDIO_FORMAT_ADPCM }
+    log("  SOUNDS.BIN: ${soundsBin.size} bytes ($pcmCount PCM, $adpcmCount ADPCM)")
 
     // Build SOUNDBNK.BIN
     val soundBnkWriter = ByteWriter()
@@ -326,14 +332,16 @@ suspend fun processDataWin(
     }
 
     // AUDO entries (16 bytes each)
-    for ((i, wav) in parsedAudio.withIndex()) {
-        if (wav != null) {
+    for ((i, audio) in parsedAudio.withIndex()) {
+        if (audio != null) {
             soundBnkWriter.writeIntLE(audioOffsets[i])             // dataOffset
             soundBnkWriter.writeIntLE(audioSizes[i])               // dataSize
-            soundBnkWriter.writeShortLE(wav.sampleRate)            // sampleRate
-            soundBnkWriter.writeByte(wav.channels)                 // channels
-            soundBnkWriter.writeByte(wav.bitsPerSample)            // bitsPerSample
-            soundBnkWriter.writeIntLE(0)                           // reserved
+            soundBnkWriter.writeShortLE(audio.sampleRate)          // sampleRate
+            soundBnkWriter.writeByte(audio.channels)               // channels
+            soundBnkWriter.writeByte(audio.bitsPerSample)          // bitsPerSample
+            soundBnkWriter.writeByte(audio.format)                 // format (0=PCM, 1=ADPCM)
+            soundBnkWriter.writeByte(0)                            // reserved
+            soundBnkWriter.writeShortLE(0)                         // reserved
         } else {
             // Unmapped entry
             soundBnkWriter.writeIntLE(0)                           // dataOffset
@@ -341,7 +349,9 @@ suspend fun processDataWin(
             soundBnkWriter.writeShortLE(0)                         // sampleRate
             soundBnkWriter.writeByte(0)                            // channels
             soundBnkWriter.writeByte(0)                            // bitsPerSample
-            soundBnkWriter.writeIntLE(0)                           // reserved
+            soundBnkWriter.writeByte(0)                            // format
+            soundBnkWriter.writeByte(0)                            // reserved
+            soundBnkWriter.writeShortLE(0)                         // reserved
         }
     }
     val soundBnkBin = soundBnkWriter.getAsByteArray()
@@ -617,7 +627,7 @@ private fun writeAtlasMetadataBytes(
 }
 
 // Parse a WAV file and extract raw PCM data. Returns null for non-WAV (e.g. OGG) or non-PCM formats.
-private fun parseWav(data: ByteArray): WavData? {
+private fun parseWav(data: ByteArray): AudioData? {
     if (4 > data.size) return null
 
     // Check RIFF magic
@@ -665,7 +675,7 @@ private fun parseWav(data: ByteArray): WavData? {
     }
 
     if (!foundFmt || pcmData == null) return null
-    return WavData(sampleRate, channels, bitsPerSample, pcmData)
+    return AudioData(AUDIO_FORMAT_PCM, sampleRate, channels, bitsPerSample, pcmData)
 }
 
 private fun readShortLE(data: ByteArray, offset: Int): Int {
@@ -680,9 +690,10 @@ private fun readIntLE(data: ByteArray, offset: Int): Int {
             ((data[offset + 3].toInt() and 0xFF) shl 24)
 }
 
-// Decode an OGG Vorbis file to raw 16-bit PCM data. Returns null on failure.
-private fun parseOgg(data: ByteArray): WavData? {
-    val (vorbis, error) = StbVorbis.openMemory(data)
+// Decode an OGG Vorbis file and encode to IMA ADPCM.
+// Returns null if the data is not a valid OGG Vorbis file.
+private fun parseOgg(data: ByteArray): AudioData? {
+    val (vorbis, _) = StbVorbis.openMemory(data)
     if (vorbis == null) return null
 
     val info = vorbis.getInfo()
@@ -696,18 +707,84 @@ private fun parseOgg(data: ByteArray): WavData? {
     val floatBuf = FloatArray(totalSamples * info.channels)
     val decoded = vorbis.getSamplesFloatInterleaved(info.channels, floatBuf, floatBuf.size)
     vorbis.close()
-
     if (decoded == 0) return null
 
-    // Convert float samples to 16-bit signed PCM
+    // Convert float samples to 16-bit signed PCM (interleaved)
     val totalFloats = decoded * info.channels
-    val pcmData = ByteArray(totalFloats * 2)
+    val pcmSamples = ShortArray(totalFloats)
     for (i in 0 until totalFloats) {
         val clamped = floatBuf[i].coerceIn(-1.0f, 1.0f)
-        val sample = (clamped * 32767.0f).toInt().toShort()
-        pcmData[i * 2] = (sample.toInt() and 0xFF).toByte()
-        pcmData[i * 2 + 1] = (sample.toInt() shr 8 and 0xFF).toByte()
+        pcmSamples[i] = (clamped * 32767.0f).toInt().toShort()
     }
 
-    return WavData(info.sampleRate, info.channels, 16, pcmData)
+    // Encode to IMA ADPCM
+    val adpcmData = imaAdpcmEncode(pcmSamples, info.channels)
+    return AudioData(AUDIO_FORMAT_ADPCM, info.sampleRate, info.channels, 4, adpcmData)
+}
+
+// ===[ IMA ADPCM Encoder ]===
+
+private val IMA_STEP_TABLE = intArrayOf(
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
+    34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
+    157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+    724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024,
+    3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+)
+
+private val IMA_INDEX_TABLE = intArrayOf(
+    -1, -1, -1, -1, 2, 4, 6, 8,
+    -1, -1, -1, -1, 2, 4, 6, 8
+)
+
+private fun imaAdpcmEncode(pcmSamples: ShortArray, channels: Int): ByteArray {
+    val totalSamples = pcmSamples.size
+    // Each sample becomes one 4-bit nibble, packed two per byte
+    val adpcmSize = (totalSamples + 1) / 2
+    val output = ByteArray(adpcmSize)
+
+    // Per-channel encoder state
+    val predictor = IntArray(channels)
+    val stepIndex = IntArray(channels)
+
+    var outPos = 0
+    var nibbleHigh = false
+    for (i in 0 until totalSamples) {
+        val ch = i % channels
+        val sample = pcmSamples[i].toInt()
+        val step = IMA_STEP_TABLE[stepIndex[ch]]
+
+        var diff = sample - predictor[ch]
+        var nibble = 0
+        if (0 > diff) {
+            nibble = 8
+            diff = -diff
+        }
+        if (diff >= step) { nibble = nibble or 4; diff -= step }
+        if (diff >= step / 2) { nibble = nibble or 2; diff -= step / 2 }
+        if (diff >= step / 4) { nibble = nibble or 1 }
+
+        // Decode the nibble to update predictor (same as decoder would)
+        var decodedDiff = step shr 3
+        if (nibble and 4 != 0) decodedDiff += step
+        if (nibble and 2 != 0) decodedDiff += step shr 1
+        if (nibble and 1 != 0) decodedDiff += step shr 2
+        if (nibble and 8 != 0) decodedDiff = -decodedDiff
+
+        predictor[ch] = (predictor[ch] + decodedDiff).coerceIn(-32768, 32767)
+        stepIndex[ch] = (stepIndex[ch] + IMA_INDEX_TABLE[nibble]).coerceIn(0, 88)
+
+        // Pack nibbles: low nibble first, then high nibble
+        if (!nibbleHigh) {
+            output[outPos] = (nibble and 0x0F).toByte()
+            nibbleHigh = true
+        } else {
+            output[outPos] = (output[outPos].toInt() or ((nibble and 0x0F) shl 4)).toByte()
+            outPos++
+            nibbleHigh = false
+        }
+    }
+
+    return output
 }
