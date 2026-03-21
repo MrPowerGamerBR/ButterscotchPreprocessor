@@ -675,7 +675,32 @@ private fun parseWav(data: ByteArray): AudioData? {
     }
 
     if (!foundFmt || pcmData == null) return null
-    return AudioData(AUDIO_FORMAT_PCM, sampleRate, channels, bitsPerSample, pcmData)
+
+    // Convert PCM data to 16-bit samples, then encode as IMA ADPCM
+    val pcmSamples: ShortArray = when (bitsPerSample) {
+        16 -> {
+            // Already 16-bit LE, just reinterpret
+            ShortArray(pcmData.size / 2) { i ->
+                ((pcmData[i * 2].toInt() and 0xFF) or ((pcmData[i * 2 + 1].toInt() and 0xFF) shl 8)).toShort()
+            }
+        }
+        8 -> {
+            // 8-bit unsigned PCM, convert to 16-bit signed
+            ShortArray(pcmData.size) { i ->
+                ((pcmData[i].toInt() and 0xFF) - 128).let { (it * 257).toShort() }
+            }
+        }
+        else -> return null
+    }
+
+    // Downsample to 22050 Hz if the sample rate is higher
+    val (downsampledSamples, finalRate) = downsampleTo22050(pcmSamples, sampleRate, channels)
+
+    // Downmix to mono
+    val finalSamples = downmixToMono(downsampledSamples, channels)
+
+    val adpcmData = imaAdpcmEncode(finalSamples, 1)
+    return AudioData(AUDIO_FORMAT_ADPCM, finalRate, 1, 4, adpcmData)
 }
 
 private fun readShortLE(data: ByteArray, offset: Int): Int {
@@ -717,9 +742,58 @@ private fun parseOgg(data: ByteArray): AudioData? {
         pcmSamples[i] = (clamped * 32767.0f).toInt().toShort()
     }
 
+    // Downsample to 22050 Hz if the sample rate is higher
+    val (downsampledSamples, finalRate) = downsampleTo22050(pcmSamples, info.sampleRate, info.channels)
+
+    // Downmix to mono
+    val finalSamples = downmixToMono(downsampledSamples, info.channels)
+
     // Encode to IMA ADPCM
-    val adpcmData = imaAdpcmEncode(pcmSamples, info.channels)
-    return AudioData(AUDIO_FORMAT_ADPCM, info.sampleRate, info.channels, 4, adpcmData)
+    val adpcmData = imaAdpcmEncode(finalSamples, 1)
+    return AudioData(AUDIO_FORMAT_ADPCM, finalRate, 1, 4, adpcmData)
+}
+
+// Downsample interleaved PCM samples to 22050 Hz using linear interpolation.
+// Returns the original samples unchanged if the sample rate is already 22050 Hz or below.
+private fun downsampleTo22050(samples: ShortArray, sampleRate: Int, channels: Int): Pair<ShortArray, Int> {
+    val targetRate = 22050
+    if (targetRate >= sampleRate) return Pair(samples, sampleRate)
+
+    val frameCount = samples.size / channels
+    val ratio = sampleRate.toDouble() / targetRate
+    val newFrameCount = (frameCount / ratio).toInt()
+    val output = ShortArray(newFrameCount * channels)
+
+    for (f in 0 until newFrameCount) {
+        val srcPos = f * ratio
+        val srcIdx = srcPos.toInt()
+        val frac = (srcPos - srcIdx).toFloat()
+
+        for (ch in 0 until channels) {
+            val s0 = samples[srcIdx * channels + ch].toInt()
+            val s1 = if (frameCount > srcIdx + 1) samples[(srcIdx + 1) * channels + ch].toInt() else s0
+            output[f * channels + ch] = (s0 + (s1 - s0) * frac).toInt().coerceIn(-32768, 32767).toShort()
+        }
+    }
+
+    return Pair(output, targetRate)
+}
+
+// Downmix interleaved multi-channel PCM samples to mono by averaging all channels.
+// Returns the original samples unchanged if already mono.
+private fun downmixToMono(samples: ShortArray, channels: Int): ShortArray {
+    if (1 >= channels) return samples
+
+    val frameCount = samples.size / channels
+    val output = ShortArray(frameCount)
+    for (f in 0 until frameCount) {
+        var sum = 0
+        for (ch in 0 until channels) {
+            sum += samples[f * channels + ch].toInt()
+        }
+        output[f] = (sum / channels).coerceIn(-32768, 32767).toShort()
+    }
+    return output
 }
 
 // ===[ IMA ADPCM Encoder ]===
