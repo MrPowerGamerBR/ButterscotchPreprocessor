@@ -89,6 +89,7 @@ fun App() {
         )
     }
     var customIconBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var customElfBytes by remember { mutableStateOf<ByteArray?>(null) }
     val disabledObjects = remember {
         mutableStateListOf(
             "obj_snowfloor",
@@ -127,8 +128,8 @@ fun App() {
 
                                 val dataWinBytes = loadedFileBytes!!
 
-                                // Fetch the butterscotch ELF from resources
-                                val elfBytes = fetchResourceBytes("/web/butterscotch.elf?v=${Date.now()}")
+                                // Use custom ELF if provided, otherwise fetch default from resources
+                                val elfBytes = customElfBytes ?: fetchResourceBytes("/web/butterscotch.elf?v=${Date.now()}")
 
                                 // Use custom icon if provided, otherwise fetch default from resources
                                 val iconBytes = customIconBytes ?: fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
@@ -688,6 +689,75 @@ fun App() {
                 deferDrawToAfterAllSteps
             ) {
                 deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
+            }
+
+            FieldWrapper {
+                Div(attrs = {
+                    classes("field-information-with-control")
+                }) {
+                    Div(attrs = {
+                        classes("field-information")
+                    }) {
+                        Div(attrs = {
+                            classes("field-title")
+                        }) {
+                            Text("Butterscotch ELF (Advanced)")
+                        }
+
+                        Div(attrs = {
+                            classes("field-description")
+                        }) {
+                            Text("When selected, Butterscotch will use a custom ELF binary instead of the built-in one. This is intended for advanced users who have built their own Butterscotch runtime. If not set, the default ELF will be used.")
+                        }
+                    }
+
+                    Div {
+                        Input(type = InputType.File) {
+                            id("custom-elf-input")
+                            style { property("display", "none") }
+                            onChange { event ->
+                                val input: dynamic = event.target
+                                val files: dynamic = input.files
+                                if (files == null || files.length == 0)
+                                    return@onChange
+
+                                val file: dynamic = files[0]
+
+                                scope.launch {
+                                    try {
+                                        customElfBytes = readFileAsBytes(file)
+                                    } catch (e: Exception) {
+                                        customElfBytes = null
+                                    }
+                                }
+                            }
+                        }
+
+                        if (customElfBytes != null) {
+                            DiscordButton(
+                                DiscordButtonType.DANGER,
+                                {
+                                    onClick {
+                                        customElfBytes = null
+                                    }
+                                }
+                            ) {
+                                Text("Remove")
+                            }
+                        } else {
+                            DiscordButton(
+                                DiscordButtonType.PRIMARY,
+                                {
+                                    onClick {
+                                        js("document.getElementById('custom-elf-input').click()")
+                                    }
+                                }
+                            ) {
+                                Text("Select")
+                            }
+                        }
+                    }
+                }
             }
         }
 
