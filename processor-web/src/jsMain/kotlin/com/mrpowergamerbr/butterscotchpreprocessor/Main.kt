@@ -156,6 +156,7 @@ fun App() {
                                     Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
                                     Iso9660Creator.IsoFile("CONFIG.JSN", """
                                         {
+                                            "deferDrawToAfterAllSteps": true,
                                             "fileSystem": {
                                                 "file0": ["mc0:UNDERTALE/file0"],
                                                 "file9": ["mc0:UNDERTALE/file9"],
@@ -169,7 +170,13 @@ fun App() {
                                                 "lightColors": [[0.7, 0.7, 0.7], [0.5, 0.5, 0.5], [0.3, 0.3, 0.3]],
                                                 "ambient": [1.0, 0.8, 0.0]
                                             },
-                                            "disabledObjects": ["obj_snowfloor"]
+                                            "disabledObjects": [
+                                                "obj_snowfloor",
+                                                "obj_glowparticle",
+                                                "obj_true_lavawaver",
+                                                "obj_true_antiwaver",
+                                                "obj_orangeparticle"
+                                            ]
                                         }
                                     """.trimIndent().encodeToByteArray()),
                                     Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
