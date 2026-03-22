@@ -2,6 +2,7 @@ package com.mrpowergamerbr.butterscotchpreprocessor.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +67,16 @@ fun App() {
             "credits.txt" to "\$BOOT:CREDITS.TXT"
         )
     }
+    val disabledObjects = remember {
+        mutableStateListOf(
+            "obj_snowfloor",
+            "obj_glowparticle",
+            "obj_true_lavawaver",
+            "obj_true_antiwaver",
+            "obj_orangeparticle"
+        )
+    }
+
     val scope = rememberCoroutineScope()
 
     // Create the worker once, loading the same script in a worker context
@@ -146,11 +157,9 @@ fun App() {
                                             putJsonArray("ambient") { add(1.0); add(0.8); add(0.0) }
                                         }
                                         putJsonArray("disabledObjects") {
-                                            add("obj_snowfloor")
-                                            add("obj_glowparticle")
-                                            add("obj_true_lavawaver")
-                                            add("obj_true_antiwaver")
-                                            add("obj_orangeparticle")
+                                            for (disabledObject in disabledObjects) {
+                                                add(disabledObject)
+                                            }
                                         }
                                     }.toString().encodeToByteArray()),
                                     Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
@@ -359,6 +368,71 @@ fun App() {
                                     filesystemMappings[sourceFile] = targetFile
                                     sourceFile = ""
                                     targetFile = ""
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Add")
+                    }
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Disabled Objects")
+                }
+
+                Table(attrs = {
+                    classes("fancy-table")
+                }) {
+                    Thead {
+                        Tr {
+                            Th { Text("Object Name") }
+                            Th {}
+                        }
+                    }
+                    Tbody {
+                        for (disabledObject in disabledObjects) {
+                            Tr {
+                                Td { Text(disabledObject) }
+                                Td(attrs = {
+                                    classes("action-cell")
+                                }) {
+                                    DiscordButton(
+                                        DiscordButtonType.NO_BACKGROUND_THEME_DEPENDENT_DARK_TEXT,
+                                        attrs = {
+                                            onClick {
+                                                disabledObjects.remove(disabledObject)
+                                            }
+                                        }
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                var objectName by remember { mutableStateOf<String>("") }
+
+                Div(attrs = {
+                    classes("add-mapping-form")
+                }) {
+                    TextInput(objectName) {
+                        attr("placeholder", "Object Name")
+                        onInput {
+                            objectName = it.value
+                        }
+                    }
+
+                    DiscordButton(
+                        DiscordButtonType.PRIMARY,
+                        {
+                            onClick {
+                                if (objectName.isNotBlank()) {
+                                    disabledObjects.add(objectName)
+                                    objectName = ""
                                 }
                             }
                         }
