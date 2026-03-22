@@ -10,7 +10,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import com.mrpowergamerbr.butterscotchpreprocessor.DataWin
 import com.mrpowergamerbr.butterscotchpreprocessor.DataWinParserOptions
+import com.mrpowergamerbr.butterscotchpreprocessor.GMLKey
 import com.mrpowergamerbr.butterscotchpreprocessor.Iso9660Creator
+import com.mrpowergamerbr.butterscotchpreprocessor.PS2PadKey
 import com.mrpowergamerbr.butterscotchpreprocessor.plausible
 import js.date.Date
 import js.objects.unsafeJso
@@ -23,12 +25,15 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.compose.web.attributes.InputType
+import org.jetbrains.compose.web.attributes.selected
 import org.jetbrains.compose.web.dom.A
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
 import org.jetbrains.compose.web.dom.H2
 import org.jetbrains.compose.web.dom.Input
+import org.jetbrains.compose.web.dom.Option
 import org.jetbrains.compose.web.dom.P
+import org.jetbrains.compose.web.dom.Select
 import org.jetbrains.compose.web.dom.Table
 import org.jetbrains.compose.web.dom.Tbody
 import org.jetbrains.compose.web.dom.Td
@@ -59,6 +64,21 @@ fun App() {
     var loadedExternalAudio by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
     var deferDrawToAfterAllSteps by remember { mutableStateOf(true) }
+    val controllerMappings = remember {
+        mutableStateMapOf(
+            PS2PadKey.PAD_UP to GMLKey.VK_UP,
+            PS2PadKey.PAD_DOWN to GMLKey.VK_DOWN,
+            PS2PadKey.PAD_LEFT to GMLKey.VK_LEFT,
+            PS2PadKey.PAD_RIGHT to GMLKey.VK_RIGHT,
+            PS2PadKey.PAD_CROSS to GMLKey.KEY_Z,
+            PS2PadKey.PAD_SQUARE to GMLKey.KEY_X,
+            PS2PadKey.PAD_START to GMLKey.KEY_C,
+            PS2PadKey.PAD_TRIANGLE to GMLKey.VK_ESCAPE,
+            PS2PadKey.PAD_L1 to GMLKey.VK_PAGEDOWN,
+            PS2PadKey.PAD_R1 to GMLKey.VK_PAGEUP,
+            PS2PadKey.PAD_L2 to GMLKey.VK_F10,
+        )
+    }
     // TODO: We need to support multiple "source folders"! (Butterscotch supports it, but we don't)
     val filesystemMappings = remember {
         mutableStateMapOf(
@@ -138,6 +158,12 @@ fun App() {
                                                 putJsonArray(mapping.key) { add(mapping.value) }
                                             }
                                         }
+                                        putJsonObject("controllerMappings") {
+                                            for ((key, value) in controllerMappings) {
+                                                put(key.ordinal.toString(), value.value)
+                                            }
+                                        }
+
                                         putJsonObject("saveIcon") {
                                             put("bgAlpha", 68)
                                             putJsonArray("bgColors") {
@@ -194,7 +220,7 @@ fun App() {
     H2 { Text("Converter") }
 
     if (!processing) {
-        Input(type = org.jetbrains.compose.web.attributes.InputType.File) {
+        Input(type = InputType.File) {
             attr("webkitdirectory", "")
             onChange { event ->
                 val input: dynamic = event.target
@@ -294,13 +320,154 @@ fun App() {
         }
 
         FieldWrappers {
-            DiscordToggle(
-                "defer-draw-to-after-all-steps",
-                "Defer Draw to After All Steps",
-                "When enabled, Butterscotch will defer GameMaker draw events after all steps events have caught up. This improves performance when the game is lagging, but can cause glitches if the game depends on draw logic.",
-                deferDrawToAfterAllSteps
-            ) {
-                deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Controller Mappings")
+                }
+
+                Table(attrs = {
+                    classes("fancy-table")
+                }) {
+                    Thead {
+                        Tr {
+                            Th { Text("PlayStation 2 Key") }
+                            Th { Text("GameMaker Key") }
+                        }
+                    }
+                    Tbody {
+                        for (ps2Key in PS2PadKey.entries) {
+                            Tr {
+                                Td {
+                                    Text(
+                                        when (ps2Key) {
+                                            PS2PadKey.PAD_LEFT -> "D-Pad Left"
+                                            PS2PadKey.PAD_DOWN -> "D-Pad Down"
+                                            PS2PadKey.PAD_RIGHT -> "D-Pad Right"
+                                            PS2PadKey.PAD_UP -> "D-Pad Up"
+                                            PS2PadKey.PAD_START -> "Start"
+                                            PS2PadKey.PAD_R3 -> "R3"
+                                            PS2PadKey.PAD_L3 -> "L3"
+                                            PS2PadKey.PAD_SELECT -> "Select"
+                                            PS2PadKey.PAD_SQUARE -> "Square (□)"
+                                            PS2PadKey.PAD_CROSS -> "Cross (X)"
+                                            PS2PadKey.PAD_CIRCLE -> "Circle (O)"
+                                            PS2PadKey.PAD_TRIANGLE -> "Triangle (△)"
+                                            PS2PadKey.PAD_R1 -> "R1"
+                                            PS2PadKey.PAD_L1 -> "L1"
+                                            PS2PadKey.PAD_R2 -> "R2"
+                                            PS2PadKey.PAD_L2 -> "L2"
+                                        }
+                                    )
+                                }
+
+                                Td {
+                                    val currentMapping = controllerMappings[ps2Key]
+
+                                    Select(attrs = {
+                                        onChange { event ->
+                                            val selectedValue = event.value
+                                            if (selectedValue == "") {
+                                                controllerMappings.remove(ps2Key)
+                                            } else {
+                                                val gmlKey = GMLKey.fromValue(selectedValue!!.toInt())
+                                                if (gmlKey != null) {
+                                                    controllerMappings[ps2Key] = gmlKey
+                                                }
+                                            }
+                                        }
+                                    }) {
+                                        Option("", attrs = {
+                                            if (currentMapping == null) selected()
+                                        }) {
+                                            Text("<not mapped>")
+                                        }
+
+                                        for (gmlKey in GMLKey.entries) {
+                                            if (gmlKey == GMLKey.VK_NOKEY)
+                                                continue
+
+                                            Option(gmlKey.value.toString(), attrs = {
+                                                if (currentMapping == gmlKey) selected()
+                                            }) {
+                                                Text(
+                                                    when (gmlKey) {
+                                                        GMLKey.VK_NOKEY -> "No Key"
+                                                        GMLKey.VK_BACKSPACE -> "Backspace"
+                                                        GMLKey.VK_TAB -> "Tab"
+                                                        GMLKey.VK_ENTER -> "Enter"
+                                                        GMLKey.VK_SHIFT -> "Shift"
+                                                        GMLKey.VK_CONTROL -> "Control"
+                                                        GMLKey.VK_ALT -> "Alt"
+                                                        GMLKey.VK_ESCAPE -> "Escape"
+                                                        GMLKey.VK_SPACE -> "Space"
+                                                        GMLKey.VK_PAGEUP -> "Page Up"
+                                                        GMLKey.VK_PAGEDOWN -> "Page Down"
+                                                        GMLKey.VK_END -> "End"
+                                                        GMLKey.VK_HOME -> "Home"
+                                                        GMLKey.VK_LEFT -> "Left Arrow"
+                                                        GMLKey.VK_UP -> "Up Arrow"
+                                                        GMLKey.VK_RIGHT -> "Right Arrow"
+                                                        GMLKey.VK_DOWN -> "Down Arrow"
+                                                        GMLKey.VK_INSERT -> "Insert"
+                                                        GMLKey.VK_DELETE -> "Delete"
+                                                        GMLKey.KEY_0 -> "0"
+                                                        GMLKey.KEY_1 -> "1"
+                                                        GMLKey.KEY_2 -> "2"
+                                                        GMLKey.KEY_3 -> "3"
+                                                        GMLKey.KEY_4 -> "4"
+                                                        GMLKey.KEY_5 -> "5"
+                                                        GMLKey.KEY_6 -> "6"
+                                                        GMLKey.KEY_7 -> "7"
+                                                        GMLKey.KEY_8 -> "8"
+                                                        GMLKey.KEY_9 -> "9"
+                                                        GMLKey.KEY_A -> "A"
+                                                        GMLKey.KEY_B -> "B"
+                                                        GMLKey.KEY_C -> "C"
+                                                        GMLKey.KEY_D -> "D"
+                                                        GMLKey.KEY_E -> "E"
+                                                        GMLKey.KEY_F -> "F"
+                                                        GMLKey.KEY_G -> "G"
+                                                        GMLKey.KEY_H -> "H"
+                                                        GMLKey.KEY_I -> "I"
+                                                        GMLKey.KEY_J -> "J"
+                                                        GMLKey.KEY_K -> "K"
+                                                        GMLKey.KEY_L -> "L"
+                                                        GMLKey.KEY_M -> "M"
+                                                        GMLKey.KEY_N -> "N"
+                                                        GMLKey.KEY_O -> "O"
+                                                        GMLKey.KEY_P -> "P"
+                                                        GMLKey.KEY_Q -> "Q"
+                                                        GMLKey.KEY_R -> "R"
+                                                        GMLKey.KEY_S -> "S"
+                                                        GMLKey.KEY_T -> "T"
+                                                        GMLKey.KEY_U -> "U"
+                                                        GMLKey.KEY_V -> "V"
+                                                        GMLKey.KEY_W -> "W"
+                                                        GMLKey.KEY_X -> "X"
+                                                        GMLKey.KEY_Y -> "Y"
+                                                        GMLKey.KEY_Z -> "Z"
+                                                        GMLKey.VK_F1 -> "F1"
+                                                        GMLKey.VK_F2 -> "F2"
+                                                        GMLKey.VK_F3 -> "F3"
+                                                        GMLKey.VK_F4 -> "F4"
+                                                        GMLKey.VK_F5 -> "F5"
+                                                        GMLKey.VK_F6 -> "F6"
+                                                        GMLKey.VK_F7 -> "F7"
+                                                        GMLKey.VK_F8 -> "F8"
+                                                        GMLKey.VK_F9 -> "F9"
+                                                        GMLKey.VK_F10 -> "F10"
+                                                        GMLKey.VK_F11 -> "F11"
+                                                        GMLKey.VK_F12 -> "F12"
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             FieldWrapper {
@@ -512,6 +679,15 @@ fun App() {
                         }
                     }
                 }
+            }
+
+            DiscordToggle(
+                "defer-draw-to-after-all-steps",
+                "Defer Draw to After All Steps",
+                "When enabled, Butterscotch will defer GameMaker draw events after all steps events have caught up. This improves performance when the game is lagging, but can cause glitches if the game depends on draw logic.",
+                deferDrawToAfterAllSteps
+            ) {
+                deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
             }
         }
 
