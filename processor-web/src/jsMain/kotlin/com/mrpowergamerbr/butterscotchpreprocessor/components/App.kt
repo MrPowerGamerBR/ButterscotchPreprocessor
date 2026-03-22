@@ -278,6 +278,10 @@ fun App() {
 
     // Convert button
     if (parsedGameName != null && !processing && downloadUrl == null) {
+        P {
+            Text("The default settings are tailored for Undertale, you don't need to change them unless if you want to customize the output for a specific game or mod!")
+        }
+        
         FieldWrappers {
             DiscordToggle(
                 "defer-draw-to-after-all-steps",
