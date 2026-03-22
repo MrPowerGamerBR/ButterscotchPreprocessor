@@ -1,96 +1,42 @@
-package com.mrpowergamerbr.butterscotchpreprocessor
+package com.mrpowergamerbr.butterscotchpreprocessor.components
 
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import com.mrpowergamerbr.butterscotchpreprocessor.DataWin
+import com.mrpowergamerbr.butterscotchpreprocessor.DataWinParserOptions
+import com.mrpowergamerbr.butterscotchpreprocessor.Iso9660Creator
+import com.mrpowergamerbr.butterscotchpreprocessor.plausible
 import js.date.Date
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import js.objects.unsafeJso
 import kotlinx.coroutines.launch
-import org.jetbrains.compose.web.dom.*
-import org.jetbrains.compose.web.renderComposable
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import org.jetbrains.compose.web.dom.A
+import org.jetbrains.compose.web.dom.Button
+import org.jetbrains.compose.web.dom.Div
+import org.jetbrains.compose.web.dom.H2
+import org.jetbrains.compose.web.dom.Input
+import org.jetbrains.compose.web.dom.P
+import org.jetbrains.compose.web.dom.Text
 import org.w3c.dom.url.URL
 import org.w3c.files.Blob
 import org.w3c.files.BlobPropertyBag
 import org.w3c.files.FileReader
 import web.workers.Worker
+import kotlin.collections.component1
+import kotlin.collections.component2
+import kotlin.collections.iterator
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-
-private external fun plausible(eventName: String)
-
-// Detect if we are running inside a Web Worker (no document available)
-private val IS_WORKER = js("typeof document === 'undefined'") as Boolean
-
-fun main() {
-    if (IS_WORKER) {
-        workerMain()
-    } else {
-        renderComposable("root") {
-            App()
-        }
-    }
-}
-
-// ======== Worker entry point ========
-
-private fun workerMain() {
-    val self: dynamic = js("self")
-    val scope = CoroutineScope(Dispatchers.Default)
-
-    self.onmessage = { event: dynamic ->
-        val msg: dynamic = event.data
-        val type = msg.type as String
-
-        when (type) {
-            "process" -> {
-                // Receive the data.win ArrayBuffer
-                val arrayBuffer: dynamic = msg.data
-                val bytes = js("new Int8Array(arrayBuffer)").unsafeCast<ByteArray>()
-
-                // Receive external audio files
-                val externalAudioObj: dynamic = msg.externalAudio
-                val externalAudioFiles = HashMap<String, ByteArray>()
-                val keys = js("Object.keys(externalAudioObj)").unsafeCast<Array<String>>()
-                for (key in keys) {
-                    val audioData = externalAudioObj[key]
-                    externalAudioFiles[key] = js("new Int8Array(audioData)").unsafeCast<ByteArray>()
-                }
-
-                scope.launch {
-                    try {
-                        val result = processDataWin(bytes, externalAudioFiles) { progressMsg ->
-                            self.postMessage(jsObject("type" to "progress", "message" to progressMsg))
-                        }
-
-                        // Send result back with all the byte arrays
-                        val resultMsg: dynamic = jsObject()
-                        resultMsg.type = "result"
-                        resultMsg.gameName = result.gameName
-                        resultMsg.clut4 = result.clut4Bin
-                        resultMsg.clut8 = result.clut8Bin
-                        resultMsg.textures = result.texturesBin
-                        resultMsg.atlas = result.atlasBin
-                        resultMsg.soundBnk = result.soundBnkBin
-                        resultMsg.sounds = result.soundsBin
-                        self.postMessage(resultMsg)
-                    } catch (e: Exception) {
-                        self.postMessage(jsObject("type" to "error", "message" to (e.message ?: "Unknown error")))
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun jsObject(vararg pairs: Pair<String, Any?>): dynamic {
-    val obj: dynamic = js("{}")
-    for ((k, v) in pairs) {
-        obj[k] = v
-    }
-    return obj
-}
-
-// ======== Main thread UI ========
 
 @Composable
 fun App() {
@@ -102,6 +48,7 @@ fun App() {
     var loadedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var loadedExternalAudio by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
+    var deferDrawToAfterAllSteps by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
     // Create the worker once, loading the same script in a worker context
@@ -154,31 +101,42 @@ fun App() {
                                     Iso9660Creator.IsoFile("ATLAS.BIN", atlasBin),
                                     Iso9660Creator.IsoFile("SOUNDBNK.BIN", soundBnkBin),
                                     Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
-                                    Iso9660Creator.IsoFile("CONFIG.JSN", """
-                                        {
-                                            "deferDrawToAfterAllSteps": true,
-                                            "fileSystem": {
-                                                "file0": ["mc0:UNDERTALE/file0"],
-                                                "file9": ["mc0:UNDERTALE/file9"],
-                                                "undertale.ini": ["mc0:UNDERTALE/undertale.ini"],
-                                                "credits.txt": ["${'$'}BOOT:CREDITS.TXT"]
-                                            },
-                                            "saveIcon": {
-                                                "bgAlpha": 68,
-                                                "bgColors": [[255, 204, 0], [255, 204, 0], [180, 140, 0], [180, 140, 0]],
-                                                "lightDirs": [[0.5, 0.5, 0.5], [0.0, -0.4, -0.1], [-0.5, -0.5, 0.5]],
-                                                "lightColors": [[0.7, 0.7, 0.7], [0.5, 0.5, 0.5], [0.3, 0.3, 0.3]],
-                                                "ambient": [1.0, 0.8, 0.0]
-                                            },
-                                            "disabledObjects": [
-                                                "obj_snowfloor",
-                                                "obj_glowparticle",
-                                                "obj_true_lavawaver",
-                                                "obj_true_antiwaver",
-                                                "obj_orangeparticle"
-                                            ]
+                                    Iso9660Creator.IsoFile("CONFIG.JSN", buildJsonObject {
+                                        put("deferDrawToAfterAllSteps", deferDrawToAfterAllSteps)
+                                        putJsonObject("fileSystem") {
+                                            putJsonArray("file0") { add("mc0:UNDERTALE/file0") }
+                                            putJsonArray("file9") { add("mc0:UNDERTALE/file9") }
+                                            putJsonArray("undertale.ini") { add("mc0:UNDERTALE/undertale.ini") }
+                                            putJsonArray("credits.txt") { add("${'$'}BOOT:CREDITS.TXT") }
                                         }
-                                    """.trimIndent().encodeToByteArray()),
+                                        putJsonObject("saveIcon") {
+                                            put("bgAlpha", 68)
+                                            putJsonArray("bgColors") {
+                                                addJsonArray { add(255); add(204); add(0) }
+                                                addJsonArray { add(255); add(204); add(0) }
+                                                addJsonArray { add(180); add(140); add(0) }
+                                                addJsonArray { add(180); add(140); add(0) }
+                                            }
+                                            putJsonArray("lightDirs") {
+                                                addJsonArray { add(0.5); add(0.5); add(0.5) }
+                                                addJsonArray { add(0.0); add(-0.4); add(-0.1) }
+                                                addJsonArray { add(-0.5); add(-0.5); add(0.5) }
+                                            }
+                                            putJsonArray("lightColors") {
+                                                addJsonArray { add(0.7); add(0.7); add(0.7) }
+                                                addJsonArray { add(0.5); add(0.5); add(0.5) }
+                                                addJsonArray { add(0.3); add(0.3); add(0.3) }
+                                            }
+                                            putJsonArray("ambient") { add(1.0); add(0.8); add(0.0) }
+                                        }
+                                        putJsonArray("disabledObjects") {
+                                            add("obj_snowfloor")
+                                            add("obj_glowparticle")
+                                            add("obj_true_lavawaver")
+                                            add("obj_true_antiwaver")
+                                            add("obj_orangeparticle")
+                                        }
+                                    }.toString().encodeToByteArray()),
                                     Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
                                 ))
 
@@ -304,6 +262,10 @@ fun App() {
 
     // Convert button
     if (parsedGameName != null && !processing && downloadUrl == null) {
+        DiscordToggle("defer-draw-to-after-all-steps", "Defer Draw to After All Steps", "When enabled, Butterscotch will defer GameMaker draw events after all steps events have caught up. This improves performance when the game is lagging, but can cause glitches if the game depends on draw logic", deferDrawToAfterAllSteps) {
+            deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
+        }
+
         Div({ classes("buttons-wrapper") }) {
             Button({
                 classes("discord-button", "primary")
@@ -321,7 +283,13 @@ fun App() {
                     }
 
                     // Send data to worker (no transfer - we need the bytes later for the ISO)
-                    worker.asDynamic().postMessage(jsObject("type" to "process", "data" to bytes, "externalAudio" to audioObj))
+                    worker.asDynamic().postMessage(
+                        unsafeJso {
+                            this.type = "process"
+                            this.data = bytes
+                            this.externalAudio = audioObj
+                        }
+                    )
                 }
             }) {
                 Text("Generate PlayStation 2 ISO")

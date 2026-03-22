@@ -4,6 +4,7 @@ $butterscotch-blue: #29a6fe;
 
 @use "components/text-input";
 @use "components/discord-button";
+@use "components/discord-toggle";
 @use "components/cards";
 @use "components/progress-log";
 @use "components/alerts";
@@ -13,6 +14,8 @@ $butterscotch-blue: #29a6fe;
 @import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,100;0,300;0,400;0,700;0,900;1,100;1,300;1,400;1,700;1,900&display=swap');
 
 :root {
+    // YES I'M LAZY WE REALLY NEED TO RENAME LORITTA-BLUE TO SOMETHING ELSE LATER
+    --loritta-blue: #{$butterscotch-blue};
     --butterscotch-blue: #{$butterscotch-blue};
     --butterscotch-blue-rgb: 41, 166, 254;
     --butterscotch-green: #298546;
@@ -151,4 +154,56 @@ hr {
     gap: 0.5em;
     flex-wrap: wrap;
     margin: 0.5em 0;
+}
+
+// This is like QuickMagic's vertical-list
+.field-wrappers {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    // Honestly, this sucks and I don't even fricking know why it works
+    // The issue is that sometimes the message preview does NOT SHOW CORRECTLY, the field-wrapper overflows the field-wrappers
+    // And for SOME REASON width: 100% fixes it, I'm still not sure exactly WHY sometimes it works and WHY sometimes it breaks
+    width: 100%;
+}
+
+.field-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: wrap;
+    gap: 8px; // Don't touch the element below us!
+
+    input {
+        width: 100%;
+    }
+}
+
+.field-information-with-control {
+    display: flex;
+    flex-direction: row;
+    flex-grow: 1;
+    // To avoid the text being smushed together with whatever control we may have
+    gap: 8px;
+    align-items: center;
+}
+
+.field-information {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex-grow: 1;
+
+    .field-title {
+        // A Discord-like field title
+        font-weight: 600;
+        font-size: 1em;
+    }
+
+    .field-description {
+        // A Discord-like field description
+        font-size: var(--description-font-size);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
 }
