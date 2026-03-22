@@ -2,6 +2,7 @@ package com.mrpowergamerbr.butterscotchpreprocessor.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,7 +27,14 @@ import org.jetbrains.compose.web.dom.Div
 import org.jetbrains.compose.web.dom.H2
 import org.jetbrains.compose.web.dom.Input
 import org.jetbrains.compose.web.dom.P
+import org.jetbrains.compose.web.dom.Table
+import org.jetbrains.compose.web.dom.Tbody
+import org.jetbrains.compose.web.dom.Td
 import org.jetbrains.compose.web.dom.Text
+import org.jetbrains.compose.web.dom.TextInput
+import org.jetbrains.compose.web.dom.Th
+import org.jetbrains.compose.web.dom.Thead
+import org.jetbrains.compose.web.dom.Tr
 import org.w3c.dom.url.URL
 import org.w3c.files.Blob
 import org.w3c.files.BlobPropertyBag
@@ -49,6 +57,15 @@ fun App() {
     var loadedExternalAudio by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
     var deferDrawToAfterAllSteps by remember { mutableStateOf(true) }
+    // TODO: We need to support multiple "source folders"! (Butterscotch supports it, but we don't)
+    val filesystemMappings = remember {
+        mutableStateMapOf(
+            "file0" to "mc0:UNDERTALE/file0",
+            "file9" to "mc0:UNDERTALE/file9",
+            "undertale.ini" to "mc0:UNDERTALE/undertale.ini",
+            "credits.txt" to "\$BOOT:CREDITS.TXT"
+        )
+    }
     val scope = rememberCoroutineScope()
 
     // Create the worker once, loading the same script in a worker context
@@ -104,10 +121,9 @@ fun App() {
                                     Iso9660Creator.IsoFile("CONFIG.JSN", buildJsonObject {
                                         put("deferDrawToAfterAllSteps", deferDrawToAfterAllSteps)
                                         putJsonObject("fileSystem") {
-                                            putJsonArray("file0") { add("mc0:UNDERTALE/file0") }
-                                            putJsonArray("file9") { add("mc0:UNDERTALE/file9") }
-                                            putJsonArray("undertale.ini") { add("mc0:UNDERTALE/undertale.ini") }
-                                            putJsonArray("credits.txt") { add("${'$'}BOOT:CREDITS.TXT") }
+                                            for (mapping in filesystemMappings) {
+                                                putJsonArray(mapping.key) { add("mc0:UNDERTALE/file0") }
+                                            }
                                         }
                                         putJsonObject("saveIcon") {
                                             put("bgAlpha", 68)
@@ -262,8 +278,91 @@ fun App() {
 
     // Convert button
     if (parsedGameName != null && !processing && downloadUrl == null) {
-        DiscordToggle("defer-draw-to-after-all-steps", "Defer Draw to After All Steps", "When enabled, Butterscotch will defer GameMaker draw events after all steps events have caught up. This improves performance when the game is lagging, but can cause glitches if the game depends on draw logic", deferDrawToAfterAllSteps) {
-            deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
+        FieldWrappers {
+            DiscordToggle(
+                "defer-draw-to-after-all-steps",
+                "Defer Draw to After All Steps",
+                "When enabled, Butterscotch will defer GameMaker draw events after all steps events have caught up. This improves performance when the game is lagging, but can cause glitches if the game depends on draw logic.",
+                deferDrawToAfterAllSteps
+            ) {
+                deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Filesystem Mappings")
+                }
+
+                Table(attrs = {
+                    classes("fancy-table")
+                }) {
+                    Thead {
+                        Tr {
+                            Th { Text("Source File") }
+                            Th { Text("Target Path") }
+                            Th {}
+                        }
+                    }
+                    Tbody {
+                        for (mapping in filesystemMappings.entries.sortedBy { it.key }) {
+                            Tr {
+                                Td { Text(mapping.key) }
+                                Td { Text(mapping.value) }
+                                Td(attrs = {
+                                    classes("action-cell")
+                                }) {
+                                    DiscordButton(
+                                        DiscordButtonType.NO_BACKGROUND_THEME_DEPENDENT_DARK_TEXT,
+                                        attrs = {
+                                            onClick {
+                                                filesystemMappings.remove(mapping.key)
+                                            }
+                                        }
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                var sourceFile by remember { mutableStateOf<String>("") }
+                var targetFile by remember { mutableStateOf<String>("") }
+
+                Div(attrs = {
+                    classes("add-mapping-form")
+                }) {
+                    TextInput(sourceFile) {
+                        attr("placeholder", "Source File")
+                        onInput {
+                            sourceFile = it.value
+                        }
+                    }
+
+                    TextInput(targetFile) {
+                        attr("placeholder", "Target Path")
+                        onInput {
+                            targetFile = it.value
+                        }
+                    }
+
+                    DiscordButton(
+                        DiscordButtonType.PRIMARY,
+                        {
+                            onClick {
+                                if (sourceFile.isNotBlank() && targetFile.isNotBlank()) {
+                                    filesystemMappings[sourceFile] = targetFile
+                                    sourceFile = ""
+                                    targetFile = ""
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Add")
+                    }
+                }
+            }
         }
 
         Div({ classes("buttons-wrapper") }) {
