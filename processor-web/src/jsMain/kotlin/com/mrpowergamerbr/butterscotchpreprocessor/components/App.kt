@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.mrpowergamerbr.butterscotchpreprocessor.ButterscotchPreprocessorWeb
 import com.mrpowergamerbr.butterscotchpreprocessor.DataWin
 import com.mrpowergamerbr.butterscotchpreprocessor.DataWinParserOptions
 import com.mrpowergamerbr.butterscotchpreprocessor.GMLKey
@@ -54,7 +55,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 @Composable
-fun App() {
+fun App(m: ButterscotchPreprocessorWeb) {
     var status by remember { mutableStateOf("Select the game's folder to begin!") }
     var logMessages by remember { mutableStateOf(listOf<String>()) }
     var downloadUrl by remember { mutableStateOf<String?>(null) }

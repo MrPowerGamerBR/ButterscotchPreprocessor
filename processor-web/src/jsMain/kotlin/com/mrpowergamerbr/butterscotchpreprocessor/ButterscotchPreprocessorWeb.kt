@@ -5,9 +5,16 @@ import js.objects.unsafeJso
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import net.perfectdreams.luna.modals.ModalManager
 import org.jetbrains.compose.web.renderComposable
+import web.dom.ElementId
+import web.dom.document
 
 class ButterscotchPreprocessorWeb {
+    val modalManager = ModalManager {
+        onDispose {}
+    }
+
     fun startWorker() {
         val self: dynamic = js("self")
         val scope = CoroutineScope(Dispatchers.Default)
@@ -70,8 +77,12 @@ class ButterscotchPreprocessorWeb {
     }
 
     fun start() {
+        val modalWrapperElement = document.createElement("div").also { it.id = ElementId("modal-wrapper") }
+        document.body.appendChild(modalWrapperElement)
+        modalManager.render(modalWrapperElement)
+
         renderComposable("root") {
-            App()
+            App(this@ButterscotchPreprocessorWeb)
         }
     }
 }
