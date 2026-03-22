@@ -14,7 +14,10 @@ import com.mrpowergamerbr.butterscotchpreprocessor.DataWinParserOptions
 import com.mrpowergamerbr.butterscotchpreprocessor.GMLKey
 import com.mrpowergamerbr.butterscotchpreprocessor.Iso9660Creator
 import com.mrpowergamerbr.butterscotchpreprocessor.PS2PadKey
+import com.mrpowergamerbr.butterscotchpreprocessor.components.colorpicker.Color
+import com.mrpowergamerbr.butterscotchpreprocessor.components.colorpicker.ColorPicker
 import com.mrpowergamerbr.butterscotchpreprocessor.plausible
+import com.mrpowergamerbr.butterscotchpreprocessor.utils.SVGIconManager
 import js.date.Date
 import js.objects.unsafeJso
 import kotlinx.coroutines.launch
@@ -47,6 +50,7 @@ import org.w3c.dom.url.URL
 import org.w3c.files.Blob
 import org.w3c.files.BlobPropertyBag
 import org.w3c.files.FileReader
+import web.dom.document
 import web.workers.Worker
 import kotlin.collections.component1
 import kotlin.collections.component2
@@ -91,6 +95,25 @@ fun App(m: ButterscotchPreprocessorWeb) {
     }
     var customIconBytes by remember { mutableStateOf<ByteArray?>(null) }
     var customElfBytes by remember { mutableStateOf<ByteArray?>(null) }
+    // Memory Card Save Icon settings
+    var bgAlpha by remember { mutableStateOf(68) }
+    var bgColorTopLeft by remember { mutableStateOf(Color(255, 204, 0)) }
+    var bgColorTopRight by remember { mutableStateOf(Color(255, 204, 0)) }
+    var bgColorBottomLeft by remember { mutableStateOf(Color(180, 140, 0)) }
+    var bgColorBottomRight by remember { mutableStateOf(Color(180, 140, 0)) }
+    var lightColor1 by remember { mutableStateOf(Color(179, 179, 179)) }
+    var lightDir1X by remember { mutableStateOf("0.5") }
+    var lightDir1Y by remember { mutableStateOf("0.5") }
+    var lightDir1Z by remember { mutableStateOf("0.5") }
+    var lightColor2 by remember { mutableStateOf(Color(128, 128, 128)) }
+    var lightDir2X by remember { mutableStateOf("0.0") }
+    var lightDir2Y by remember { mutableStateOf("-0.4") }
+    var lightDir2Z by remember { mutableStateOf("-0.1") }
+    var lightColor3 by remember { mutableStateOf(Color(77, 77, 77)) }
+    var lightDir3X by remember { mutableStateOf("-0.5") }
+    var lightDir3Y by remember { mutableStateOf("-0.5") }
+    var lightDir3Z by remember { mutableStateOf("0.5") }
+    var ambientColor by remember { mutableStateOf(Color(255, 204, 0)) }
     val disabledObjects = remember {
         mutableStateListOf(
             "obj_snowfloor",
@@ -167,24 +190,24 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                         }
 
                                         putJsonObject("saveIcon") {
-                                            put("bgAlpha", 68)
+                                            put("bgAlpha", bgAlpha)
                                             putJsonArray("bgColors") {
-                                                addJsonArray { add(255); add(204); add(0) }
-                                                addJsonArray { add(255); add(204); add(0) }
-                                                addJsonArray { add(180); add(140); add(0) }
-                                                addJsonArray { add(180); add(140); add(0) }
+                                                addJsonArray { add(bgColorTopLeft.red); add(bgColorTopLeft.green); add(bgColorTopLeft.blue) }
+                                                addJsonArray { add(bgColorTopRight.red); add(bgColorTopRight.green); add(bgColorTopRight.blue) }
+                                                addJsonArray { add(bgColorBottomLeft.red); add(bgColorBottomLeft.green); add(bgColorBottomLeft.blue) }
+                                                addJsonArray { add(bgColorBottomRight.red); add(bgColorBottomRight.green); add(bgColorBottomRight.blue) }
                                             }
                                             putJsonArray("lightDirs") {
-                                                addJsonArray { add(0.5); add(0.5); add(0.5) }
-                                                addJsonArray { add(0.0); add(-0.4); add(-0.1) }
-                                                addJsonArray { add(-0.5); add(-0.5); add(0.5) }
+                                                addJsonArray { add(lightDir1X.toDoubleOrNull() ?: 0.0); add(lightDir1Y.toDoubleOrNull() ?: 0.0); add(lightDir1Z.toDoubleOrNull() ?: 0.0) }
+                                                addJsonArray { add(lightDir2X.toDoubleOrNull() ?: 0.0); add(lightDir2Y.toDoubleOrNull() ?: 0.0); add(lightDir2Z.toDoubleOrNull() ?: 0.0) }
+                                                addJsonArray { add(lightDir3X.toDoubleOrNull() ?: 0.0); add(lightDir3Y.toDoubleOrNull() ?: 0.0); add(lightDir3Z.toDoubleOrNull() ?: 0.0) }
                                             }
                                             putJsonArray("lightColors") {
-                                                addJsonArray { add(0.7); add(0.7); add(0.7) }
-                                                addJsonArray { add(0.5); add(0.5); add(0.5) }
-                                                addJsonArray { add(0.3); add(0.3); add(0.3) }
+                                                addJsonArray { add(lightColor1.red / 255.0); add(lightColor1.green / 255.0); add(lightColor1.blue / 255.0) }
+                                                addJsonArray { add(lightColor2.red / 255.0); add(lightColor2.green / 255.0); add(lightColor2.blue / 255.0) }
+                                                addJsonArray { add(lightColor3.red / 255.0); add(lightColor3.green / 255.0); add(lightColor3.blue / 255.0) }
                                             }
-                                            putJsonArray("ambient") { add(1.0); add(0.8); add(0.0) }
+                                            putJsonArray("ambient") { add(ambientColor.red / 255.0); add(ambientColor.green / 255.0); add(ambientColor.blue / 255.0) }
                                         }
                                         putJsonArray("disabledObjects") {
                                             for (disabledObject in disabledObjects) {
@@ -609,6 +632,145 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         }
                     ) {
                         Text("Add")
+                    }
+                }
+            }
+
+            val checkmarkIcon = SVGIconManager.fromRawHtml(ButterscotchPreprocessorWeb.CHECKMARK_SVG)
+            val eyeDropperIcon = SVGIconManager.fromRawHtml(ButterscotchPreprocessorWeb.EYE_DROPPER_SVG)
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Ambient Light")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, ambientColor) {
+                    if (it != null) ambientColor = it
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Background Alpha")
+                }
+
+                Div(attrs = { classes("range-input-with-value") }) {
+                    Input(InputType.Range) {
+                        attr("min", "0")
+                        attr("max", "128")
+                        value(bgAlpha.toString())
+                        onInput { bgAlpha = it.value!!.toInt() }
+                    }
+
+                    Div(attrs = { classes("range-input-value") }) {
+                        Text(bgAlpha.toString())
+                    }
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Background (Top Left)")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, bgColorTopLeft) {
+                    if (it != null) bgColorTopLeft = it
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Background (Top Right)")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, bgColorTopRight) {
+                    if (it != null) bgColorTopRight = it
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Background (Bottom Left)")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, bgColorBottomLeft) {
+                    if (it != null) bgColorBottomLeft = it
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Background (Bottom Right)")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, bgColorBottomRight) {
+                    if (it != null) bgColorBottomRight = it
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Light 1")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, lightColor1) {
+                    if (it != null) lightColor1 = it
+                }
+                Div(attrs = { classes("light-direction-inputs") }) {
+                    Text("Direction:")
+                    TextInput(lightDir1X) {
+                        attr("placeholder", "X")
+                        onInput { lightDir1X = it.value }
+                    }
+                    TextInput(lightDir1Y) {
+                        attr("placeholder", "Y")
+                        onInput { lightDir1Y = it.value }
+                    }
+                    TextInput(lightDir1Z) {
+                        attr("placeholder", "Z")
+                        onInput { lightDir1Z = it.value }
+                    }
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Light 2")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, lightColor2) {
+                    if (it != null) lightColor2 = it
+                }
+                Div(attrs = { classes("light-direction-inputs") }) {
+                    Text("Direction:")
+                    TextInput(lightDir2X) {
+                        attr("placeholder", "X")
+                        onInput { lightDir2X = it.value }
+                    }
+                    TextInput(lightDir2Y) {
+                        attr("placeholder", "Y")
+                        onInput { lightDir2Y = it.value }
+                    }
+                    TextInput(lightDir2Z) {
+                        attr("placeholder", "Z")
+                        onInput { lightDir2Z = it.value }
+                    }
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Memory Card Save Light 3")
+                }
+                ColorPicker(m, checkmarkIcon, eyeDropperIcon, lightColor3) {
+                    if (it != null) lightColor3 = it
+                }
+                Div(attrs = { classes("light-direction-inputs") }) {
+                    Text("Direction:")
+                    TextInput(lightDir3X) {
+                        attr("placeholder", "X")
+                        onInput { lightDir3X = it.value }
+                    }
+                    TextInput(lightDir3Y) {
+                        attr("placeholder", "Y")
+                        onInput { lightDir3Y = it.value }
+                    }
+                    TextInput(lightDir3Z) {
+                        attr("placeholder", "Z")
+                        onInput { lightDir3Z = it.value }
                     }
                 }
             }
