@@ -81,7 +81,7 @@ suspend fun processDataWin(
     // Collect sprites
     for ((sprIdx, sprite) in dw.sprt.sprites.withIndex()) {
         val name = sprite.name ?: "sprite_$sprIdx"
-        val groupKey = "spr/$name"
+        val groupKey = getAtlasGroupKey(name)
         for ((frameIdx, texOffset) in sprite.textureOffsets.withIndex()) {
             val tpagIdx = dw.resolveTPAG(texOffset)
             if (0 > tpagIdx) continue
@@ -166,12 +166,53 @@ suspend fun processDataWin(
         log("Cropped transparent borders from $croppedCount sprite images")
     }
 
-    // Resize any images exceeding 512x512
-    val maxDim = 512
+
     var resizedCount = 0
     for (i in allImages.indices) {
         val (name, img) = allImages[i]
+
+        // Resize any images exceeding 512x512
+        // We'll also resize any "problematic" sprites
+        val maxDim = if (name.startsWith("spr/spr_sidestalk")) {
+            16
+        } else if (name.startsWith("spr/spr_mouthball_")) {
+            32
+        } else if (name.startsWith("spr/spr_fa_seq_b_") || name.startsWith("spr/spr_floweyarm")) {
+            64
+        } else if (name.startsWith("spr/spr_fa_stemunder_")) {
+            64
+        } else if (name.startsWith("spr/spr_floweynuke_explosion")) {
+            16
+        } else if (name.startsWith("spr/spr_floweyx_flame_move_")) {
+            16
+        } else if (name.startsWith("spr/spr_venus_placeholder")) {
+            32
+        } else if (name.startsWith("spr/spr_f_handgun_neo_")) {
+            32
+        } else if (name.startsWith("spr/spr_vines_flowey")) {
+            32
+        } else if (name.startsWith("spr/spr_floweyx_flamethrower")) {
+            64
+        } else if (name.startsWith("spr/spr_floweynuke")) {
+            32
+        } else if (name.startsWith("spr/spr_bgpipe")) {
+            64
+        } else if (name.startsWith("spr/spr_tvinside_old")) {
+            64
+        } else if (name.startsWith("spr/spr_floweyx_tv")) {
+            128
+        } else if (name.startsWith("spr/spr_floweyx_fleshmound")) {
+            64
+        } else if (name.startsWith("spr/spr_tv_floweyx_laugh")) {
+            64
+        } else if (name.startsWith("spr/spr_floweyx_mouthedge")) {
+            64
+        } else {
+            512
+        }
+
         if (maxDim >= img.width && maxDim >= img.height) continue
+
         val scale = minOf(maxDim.toDouble() / img.width, maxDim.toDouble() / img.height)
         val newW = maxOf((img.width * scale).toInt(), 1)
         val newH = maxOf((img.height * scale).toInt(), 1)
@@ -187,7 +228,7 @@ suspend fun processDataWin(
         resizedCount++
     }
     if (resizedCount > 0) {
-        log("Resized $resizedCount images to fit within ${maxDim}x${maxDim}")
+        log("Resized $resizedCount images to fit")
     }
 
     log("Total images to process: ${allImages.size}")
@@ -861,4 +902,44 @@ private fun imaAdpcmEncode(pcmSamples: ShortArray, channels: Int): ByteArray {
     }
 
     return output
+}
+
+// Omega Flowey sprite prefixes that should all be packed into the same atlas to reduce VRAM evictions during the fight
+private val OMEGA_FLOWEY_PREFIXES = listOf(
+    "spr_floweyx_tv",
+    "spr_tvinside",
+    "spr_lefteye_",
+    "spr_flipeye_",
+    "spr_floweyx_mouth",
+    "spr_floweyx_dimple",
+    "spr_mouthball",
+    "spr_mouthbeam",
+    "spr_mouthflash",
+    "spr_floweyx_fleshmound",
+    "spr_fleshmound",
+    "spr_nostrils",
+    "spr_dentata_",
+    "spr_halfdentata_",
+    "spr_floweyx_flame",
+    "spr_floweynuke",
+    "spr_venus_placeholder",
+    "spr_bgpipe",
+    "spr_pipepart",
+    "spr_sidestalk",
+    "spr_vines_flowey",
+    "spr_floweyarm",
+    "spr_tv_warning",
+    "spr_tv_exface",
+    "spr_tv_floweyface",
+    "spr_tv_floweyx_",
+    "spr_noise",
+)
+
+private const val OMEGA_FLOWEY_GROUP = "spr/_omega_flowey"
+
+private fun getAtlasGroupKey(spriteName: String): String {
+    for (prefix in OMEGA_FLOWEY_PREFIXES) {
+        if (spriteName.startsWith(prefix)) return OMEGA_FLOWEY_GROUP
+    }
+    return "spr/$spriteName"
 }
