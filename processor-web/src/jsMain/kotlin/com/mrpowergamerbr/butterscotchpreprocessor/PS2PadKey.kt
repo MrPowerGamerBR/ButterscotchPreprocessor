@@ -16,5 +16,9 @@ enum class PS2PadKey(val value: Int) {
     PAD_R1(0x0800),
     PAD_L1(0x0400),
     PAD_R2(0x0200),
-    PAD_L2(0x0100)
+    PAD_L2(0x0100);
+
+    companion object {
+        fun fromValue(value: Int): PS2PadKey? = PS2PadKey.entries.find { value == it.value }
+    }
 }

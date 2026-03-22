@@ -162,7 +162,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                         }
                                         putJsonObject("controllerMappings") {
                                             for ((key, value) in controllerMappings) {
-                                                put(key.ordinal.toString(), value.value)
+                                                put(key.value.toString(), value.value)
                                             }
                                         }
 
