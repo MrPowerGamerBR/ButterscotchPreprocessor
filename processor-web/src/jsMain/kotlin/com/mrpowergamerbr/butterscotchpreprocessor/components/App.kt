@@ -61,7 +61,7 @@ import kotlin.coroutines.resumeWithException
 @Composable
 fun App(m: ButterscotchPreprocessorWeb) {
     var status by remember { mutableStateOf("Select the game's folder to begin!") }
-    var logMessages by remember { mutableStateOf(listOf<String>()) }
+    var logMessages = remember { mutableStateListOf<String>() }
     var downloadUrl by remember { mutableStateOf<String?>(null) }
     var isoFileName by remember { mutableStateOf("output.iso") }
     var processing by remember { mutableStateOf(false) }
@@ -135,7 +135,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                     "progress" -> {
                         val progressMsg = msg.message as String
                         println(progressMsg)
-                        logMessages = logMessages + progressMsg
+                        logMessages.add(progressMsg)
                     }
                     "result" -> {
                         scope.launch {
@@ -225,7 +225,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 plausible("Generated PS2 ISO")
                             } catch (e: Exception) {
                                 status = "Error creating ISO: ${e.message}"
-                                logMessages = logMessages + "Error: ${e.stackTraceToString()}"
+                                logMessages.add("Error: ${e.stackTraceToString()}")
                             } finally {
                                 processing = false
                             }
@@ -253,7 +253,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 if (files == null || files.length == 0) return@onChange
 
                 downloadUrl = null
-                logMessages = listOf()
+                logMessages.clear()
                 parsedGameName = null
                 loadedExternalAudio = emptyMap()
                 status = "Reading folder..."
@@ -930,7 +930,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 onClick {
                     val bytes = loadedFileBytes ?: return@onClick
                     processing = true
-                    logMessages = listOf()
+                    logMessages.clear()
                     status = "Processing..."
 
                     // Build external audio map as a JS object for the worker
@@ -965,13 +965,25 @@ fun App(m: ButterscotchPreprocessorWeb) {
     }
 
     // Download button
-    downloadUrl?.let { url ->
+    if (downloadUrl != null) {
         Div({ classes("buttons-wrapper") }) {
-            A(href = url, attrs = {
+            A(href = downloadUrl, attrs = {
                 attr("download", isoFileName)
                 classes("discord-button", "success")
             }) {
                 Text("Download ISO")
+            }
+
+            DiscordButton(
+                DiscordButtonType.NO_BACKGROUND_THEME_DEPENDENT_DARK_TEXT,
+                attrs = {
+                    onClick {
+                        downloadUrl = null
+                        logMessages.clear()
+                    }
+                }
+            ) {
+                Text("Go Back")
             }
         }
     }
