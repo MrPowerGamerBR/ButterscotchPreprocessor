@@ -122,7 +122,7 @@ fun App() {
                                         put("deferDrawToAfterAllSteps", deferDrawToAfterAllSteps)
                                         putJsonObject("fileSystem") {
                                             for (mapping in filesystemMappings) {
-                                                putJsonArray(mapping.key) { add("mc0:UNDERTALE/file0") }
+                                                putJsonArray(mapping.key) { add(mapping.value) }
                                             }
                                         }
                                         putJsonObject("saveIcon") {
@@ -281,7 +281,7 @@ fun App() {
         P {
             Text("The default settings are tailored for Undertale, you don't need to change them unless if you want to customize the output for a specific game or mod!")
         }
-        
+
         FieldWrappers {
             DiscordToggle(
                 "defer-draw-to-after-all-steps",
