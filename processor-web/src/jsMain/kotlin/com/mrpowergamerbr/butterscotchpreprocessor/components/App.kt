@@ -22,6 +22,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import org.jetbrains.compose.web.attributes.InputType
 import org.jetbrains.compose.web.dom.A
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
@@ -67,6 +68,7 @@ fun App() {
             "credits.txt" to "\$BOOT:CREDITS.TXT"
         )
     }
+    var customIconBytes by remember { mutableStateOf<ByteArray?>(null) }
     val disabledObjects = remember {
         mutableStateListOf(
             "obj_snowfloor",
@@ -108,8 +110,8 @@ fun App() {
                                 // Fetch the butterscotch ELF from resources
                                 val elfBytes = fetchResourceBytes("/web/butterscotch.elf?v=${Date.now()}")
 
-                                // Fetch icon from resources
-                                val iconBytes = fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
+                                // Use custom icon if provided, otherwise fetch default from resources
+                                val iconBytes = customIconBytes ?: fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
 
                                 // Create SYSTEM.CNF content
                                 val systemCnf = "BOOT2 = cdrom0:\\BUTR_000.00;1\nVER = 1.00\nVMODE = NTSC\n"
@@ -438,6 +440,76 @@ fun App() {
                         }
                     ) {
                         Text("Add")
+                    }
+                }
+            }
+
+            FieldWrapper {
+                Div(attrs = {
+                    classes("field-information-with-control")
+                }) {
+                    Div(attrs = {
+                        classes("field-information")
+                    }) {
+                        Div(attrs = {
+                            classes("field-title")
+                        }) {
+                            Text("Memory Card Save Icon")
+                        }
+
+                        Div(attrs = {
+                            classes("field-description")
+                        }) {
+                            Text("When selected, Butterscotch will use a custom memory card save icon for your game. The icon must be in the PlayStation 2 save icon format. If not set, then the default annoying dog save icon will be used.")
+                        }
+                    }
+
+                    Div {
+                        Input(type = InputType.File) {
+                            id("custom-icon-input")
+                            style { property("display", "none") }
+                            onChange { event ->
+                                val input: dynamic = event.target
+                                val files: dynamic = input.files
+                                if (files == null || files.length == 0)
+                                    return@onChange
+
+                                val file: dynamic = files[0]
+
+                                scope.launch {
+                                    try {
+                                        customIconBytes = readFileAsBytes(file)
+                                    } catch (e: Exception) {
+                                        // Reset on error
+                                        customIconBytes = null
+                                    }
+                                }
+                            }
+                        }
+
+                        if (customIconBytes != null) {
+                            DiscordButton(
+                                DiscordButtonType.DANGER,
+                                {
+                                    onClick {
+                                        customIconBytes = null
+                                    }
+                                }
+                            ) {
+                                Text("Remove")
+                            }
+                        } else {
+                            DiscordButton(
+                                DiscordButtonType.PRIMARY,
+                                {
+                                    onClick {
+                                        js("document.getElementById('custom-icon-input').click()")
+                                    }
+                                }
+                            ) {
+                                Text("Select")
+                            }
+                        }
                     }
                 }
             }
