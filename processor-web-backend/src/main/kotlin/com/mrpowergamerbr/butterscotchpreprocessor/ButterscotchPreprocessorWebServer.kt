@@ -66,7 +66,13 @@ class ButterscotchPreprocessorWebServer(
                                         text("Butterscotch is an open source re-implementation of GameMaker: Studio's runner.")
                                     }
                                     p {
-                                        text("Generate a PlayStation 2 ISO for a GameMaker: Studio 1.4.1804 game! (for now it is tailored for Undertale v1.08, screen resizing and input mapping coming soon\u2122)") }
+                                        text("Generate a PlayStation 2 ISO for a GameMaker: Studio 1.4.1804 game! (for now it is tailored for Undertale v1.08)")
+                                    }
+
+                                    p {
+                                        text("Butterscotch is an open source re-implementation of GameMaker: Studio's runner.")
+                                    }
+
                                     p {
                                         b {
                                             text("Butterscotch Project URL: ")
@@ -74,6 +80,32 @@ class ButterscotchPreprocessorWebServer(
                                         a(href = "https://github.com/MrPowerGamerBR/Butterscotch") {
                                             +"https://github.com/MrPowerGamerBR/Butterscotch"
                                         }
+                                    }
+
+                                    h2 {
+                                        text("Tested & Working Consoles")
+                                    }
+
+                                    ul {
+                                        li {
+                                            text("PlayStation 2 Slim (SCPH-90010)")
+
+                                            ul {
+                                                li {
+                                                    text("OPL v.1.2.0-Beta-2225-894222 (ETH)")
+                                                }
+
+                                                li {
+                                                    text("OPL v.1.2.0-Beta-2225-894222 (USB)")
+                                                }
+                                            }
+                                        }
+                                        li {
+                                            text("PCSX2 v2.6.3")
+                                        }
+                                    }
+                                    b {
+                                        text("Some users have reported issues when loading Butterscotch via OPL with MX4SIO (loading ISOs from the memory card)")
                                     }
 
                                     hr {}
