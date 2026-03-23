@@ -82,6 +82,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
             PS2PadKey.PAD_L1 to GMLKey.VK_PAGEDOWN,
             PS2PadKey.PAD_R1 to GMLKey.VK_PAGEUP,
             PS2PadKey.PAD_L2 to GMLKey.VK_F10,
+            PS2PadKey.PAD_SELECT to GMLKey.VK_F12,
         )
     }
     // TODO: We need to support multiple "source folders"! (Butterscotch supports it, but we don't)
@@ -123,6 +124,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
             "obj_orangeparticle"
         )
     }
+    var debugOverlayEnabled by remember { mutableStateOf(true) }
 
     val scope = rememberCoroutineScope()
 
@@ -178,6 +180,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                     Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
                                     Iso9660Creator.IsoFile("CONFIG.JSN", buildJsonObject {
                                         put("deferDrawToAfterAllSteps", deferDrawToAfterAllSteps)
+                                        put("debugOverlayEnabled", debugOverlayEnabled)
                                         putJsonObject("fileSystem") {
                                             for (mapping in filesystemMappings) {
                                                 putJsonArray(mapping.key) { add(mapping.value) }
@@ -852,6 +855,15 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 deferDrawToAfterAllSteps
             ) {
                 deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
+            }
+
+            DiscordToggle(
+                "debug-overlay-enabled",
+                "Debug Overlay Enabled by Default",
+                "When enabled, Butterscotch will render the debug overlay by default. You can toggle the debug overlay by pressing the key that's bound to F12.",
+                debugOverlayEnabled
+            ) {
+                debugOverlayEnabled = !debugOverlayEnabled
             }
 
             FieldWrapper {
