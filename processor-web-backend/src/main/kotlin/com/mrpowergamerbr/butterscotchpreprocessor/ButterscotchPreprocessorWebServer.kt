@@ -82,6 +82,15 @@ class ButterscotchPreprocessorWebServer(
                                         }
                                     }
 
+                                    p {
+                                        b {
+                                            text("Discord: ")
+                                        }
+                                        a(href = "https://discord.gg/2gQR7t3WJR") {
+                                            +"https://discord.gg/2gQR7t3WJR"
+                                        }
+                                    }
+
                                     h2 {
                                         text("Tested & Working Consoles")
                                     }
