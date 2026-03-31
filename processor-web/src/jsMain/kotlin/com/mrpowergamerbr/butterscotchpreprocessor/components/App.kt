@@ -75,6 +75,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
     var processing by remember { mutableStateOf(false) }
     var loadedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var loadedExternalAudio by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
+    var loadedAudioGroupFiles by remember { mutableStateOf<Map<Int, ByteArray>>(emptyMap()) }
     var loadedSourceFiles by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
     var deferDrawToAfterAllSteps by remember { mutableStateOf(true) }
@@ -282,16 +283,19 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 logMessages.clear()
                 parsedGameName = null
                 loadedExternalAudio = emptyMap()
+                loadedAudioGroupFiles = emptyMap()
                 loadedSourceFiles = emptyMap()
                 status = "Reading folder..."
 
                 scope.launch {
                     try {
-                        // Find the data.win file, collect audio files, and other source files
+                        // Find the data.win file, collect audio files, audiogroup files, and other source files
                         var dataWinFile: dynamic = null
                         val audioFiles = HashMap<String, dynamic>()
+                        val audioGroupDatFiles = HashMap<Int, dynamic>() // groupId -> file
                         val otherFiles = HashMap<String, dynamic>()
                         val fileCount = files.length as Int
+                        val audioGroupPattern = Regex("""audiogroup(\d+)\.dat""", RegexOption.IGNORE_CASE)
 
                         // Get the root folder name from the first file's webkitRelativePath
                         val firstFile: dynamic = files[0]
@@ -305,9 +309,17 @@ fun App(m: ButterscotchPreprocessorWeb) {
                             } else if (name.endsWith(".ogg") || name.endsWith(".wav")) {
                                 audioFiles[file.name as String] = file
                             } else {
-                                // Use relative path (minus root folder) to preserve directory structure
-                                val relativePath = (file.webkitRelativePath as String).removePrefix(rootFolderPrefix)
-                                otherFiles[relativePath] = file
+                                val audioGroupMatch = audioGroupPattern.matchEntire(file.name as String)
+                                if (audioGroupMatch != null) {
+                                    val groupId = audioGroupMatch.groupValues[1].toInt()
+                                    if (groupId != 0) {
+                                        audioGroupDatFiles[groupId] = file
+                                    }
+                                } else {
+                                    // Use relative path (minus root folder) to preserve directory structure
+                                    val relativePath = (file.webkitRelativePath as String).removePrefix(rootFolderPrefix)
+                                    otherFiles[relativePath] = file
+                                }
                             }
                         }
 
@@ -328,6 +340,16 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 externalAudio[fileName] = readFileAsBytes(file)
                             }
                             loadedExternalAudio = externalAudio
+                        }
+
+                        // Load audiogroup files
+                        if (audioGroupDatFiles.isNotEmpty()) {
+                            status = "Reading ${audioGroupDatFiles.size} audiogroup files..."
+                            val audioGroups = HashMap<Int, ByteArray>()
+                            for ((groupId, file) in audioGroupDatFiles) {
+                                audioGroups[groupId] = readFileAsBytes(file)
+                            }
+                            loadedAudioGroupFiles = audioGroups
                         }
 
                         // Load other source files (for $BOOT filesystem mappings)
@@ -370,11 +392,13 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         val gameName = dw.gen8.displayName ?: dw.gen8.name ?: "Unknown"
                         parsedGameName = gameName
                         val audioMsg = if (audioFiles.isNotEmpty()) " (${audioFiles.size} audio files)" else ""
-                        status = "Game: $gameName$audioMsg"
+                        val audioGroupMsg = if (audioGroupDatFiles.isNotEmpty()) " (${audioGroupDatFiles.size} audiogroup files)" else ""
+                        status = "Game: $gameName$audioMsg$audioGroupMsg"
                     } catch (e: Exception) {
                         status = "Error reading folder: ${e.message}"
                         loadedFileBytes = null
                         loadedExternalAudio = emptyMap()
+                        loadedAudioGroupFiles = emptyMap()
                         loadedSourceFiles = emptyMap()
                     }
                 }
@@ -998,12 +1022,20 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         }
                     }
 
+                    // Build audiogroup map as a JS object for the worker
+                    val audioGroupObj = unsafeJso<dynamic> {
+                        for ((groupId, data) in loadedAudioGroupFiles) {
+                            this[groupId.toString()] = data
+                        }
+                    }
+
                     // Send data to worker (no transfer - we need the bytes later for the ISO)
                     worker.asDynamic().postMessage(
                         unsafeJso {
                             this.type = "process"
                             this.data = bytes
                             this.externalAudio = audioObj
+                            this.audioGroups = audioGroupObj
                         }
                     )
                 }

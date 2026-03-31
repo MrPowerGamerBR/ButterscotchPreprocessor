@@ -28,6 +28,7 @@ private data class CropInfo(val offsetX: Int, val offsetY: Int, val croppedWidth
 suspend fun processDataWin(
     dataWinBytes: ByteArray,
     externalAudioFiles: Map<String, ByteArray> = emptyMap(),
+    audioGroupFiles: Map<Int, ByteArray> = emptyMap(),
     progressCallback: ((String) -> Unit)? = null
 ): ProcessingResult {
     val log = progressCallback ?: {}
@@ -320,22 +321,63 @@ suspend fun processDataWin(
     // Step 8: Process sounds
     log("Processing sounds...")
 
+    // Parse audiogroup files (audiogroup%d.dat) for their AUDO chunks
+    val audioGroupAudo = HashMap<Int, Audo>()
+    for ((groupId, groupBytes) in audioGroupFiles) {
+        log("Parsing audiogroup${groupId}.dat...")
+        val agDw = DataWin.parse(groupBytes, DataWinParserOptions(
+            parseGen8 = false, parseOptn = false, parseLang = false, parseExtn = false,
+            parseSond = false, parseAgrp = false, parseSprt = false, parseBgnd = false,
+            parsePath = false, parseScpt = false, parseGlob = false, parseShdr = false,
+            parseFont = false, parseTmln = false, parseObjt = false, parseRoom = false,
+            parseTpag = false, parseCode = false, parseVari = false, parseFunc = false,
+            parseStrg = false, parseTxtr = false, parseAudo = true,
+            skipLoadingPreciseMasksForNonPreciseSprites = true
+        ))
+        audioGroupAudo[groupId] = agDw.audo
+        log("  audiogroup${groupId}.dat: ${agDw.audo.entries.size} audio entries")
+    }
+
     log("Decoding embedded audio files...")
 
-    // Decode embedded AUDO entries (WAV or OGG)
+    // Decode embedded AUDO entries from the main data.win (audiogroup 0)
     val parsedAudio = dw.audo.entries.map { entry ->
         if (entry.data != null) (parseWav(entry.data) ?: parseOgg(entry.data)) else null
     }.toMutableList()
     val embeddedCount = parsedAudio.count { it != null }
 
+    // Decode AUDO entries from audiogroup files and map them
+    // sondIndex -> new audoIndex in parsedAudio
+    val externalAudoMap = HashMap<Int, Int>()
+    var audioGroupCount = 0
+    for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
+        if (sound.audioGroup == 0) continue
+        val groupAudo = audioGroupAudo[sound.audioGroup] ?: continue
+        if (0 > sound.audioFile || sound.audioFile >= groupAudo.entries.size) continue
+
+        val entry = groupAudo.entries[sound.audioFile]
+        if (entry.data != null) {
+            val decoded = parseWav(entry.data) ?: parseOgg(entry.data)
+            if (decoded != null) {
+                val newAudoIndex = parsedAudio.size
+                parsedAudio.add(decoded)
+                externalAudoMap[sondIdx] = newAudoIndex
+                audioGroupCount++
+            }
+        }
+    }
+
     // Resolve non-embedded sounds from external audio files
     // These get appended as new AUDO entries at the end of the list
-    val externalAudoMap = HashMap<Int, Int>() // sondIndex -> new audoIndex
     var externalCount = 0
     log("Decoding non-embedded audio files...")
     for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
         val isEmbedded = (sound.flags and 0x01) != 0
         if (isEmbedded)
+            continue
+
+        // Skip sounds already resolved from audiogroup files
+        if (externalAudoMap.containsKey(sondIdx))
             continue
 
         // Non-embedded audio files DO have an entry on the AUDO chunk, but we will ignore them because they are bogus entries
@@ -355,7 +397,7 @@ suspend fun processDataWin(
 
     val totalDecoded = parsedAudio.count { it != null }
     val failedCount = parsedAudio.size - totalDecoded
-    log("  $embeddedCount embedded + $externalCount external = $totalDecoded decoded sounds, $failedCount failed or empty")
+    log("  $embeddedCount embedded + $audioGroupCount from audiogroups + $externalCount external = $totalDecoded decoded sounds, $failedCount failed or empty")
 
     // Build SOUNDS.BIN (PCM data and raw OGG files concatenated)
     val soundsWriter = ByteWriter()

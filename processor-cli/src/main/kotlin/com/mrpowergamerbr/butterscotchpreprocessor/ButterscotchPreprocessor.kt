@@ -45,9 +45,12 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
         // Load external audio files from the same directory as data.win
         val externalAudioFiles = loadExternalAudioFiles(dataWinDir)
 
+        // Load audiogroup files (audiogroup%d.dat) from the same directory as data.win
+        val audioGroupFiles = loadAudioGroupFiles(dataWinDir)
+
         // Core processing via common pipeline
         val result = runBlocking {
-            processDataWin(bytes, externalAudioFiles) { echo(it) }
+            processDataWin(bytes, externalAudioFiles, audioGroupFiles) { echo(it) }
         }
 
         // Write output files
@@ -238,6 +241,24 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
             count++
         }
         println("  Dumped $count unique tiles to ${tilesDir.path}")
+    }
+
+    // Scan a directory for audiogroup%d.dat files and load them into a map keyed by group ID
+    // Audiogroup 0 is embedded in data.win, so we skip it
+    private fun loadAudioGroupFiles(dir: File): Map<Int, ByteArray> {
+        val result = HashMap<Int, ByteArray>()
+        val files = dir.listFiles() ?: return result
+        val pattern = Regex("""audiogroup(\d+)\.dat""", RegexOption.IGNORE_CASE)
+        for (file in files) {
+            val match = pattern.matchEntire(file.name) ?: continue
+            val groupId = match.groupValues[1].toInt()
+            if (groupId == 0) continue // audiogroup 0 is in data.win
+            result[groupId] = file.readBytes()
+        }
+        if (result.isNotEmpty()) {
+            println("Found ${result.size} audiogroup files in ${dir.path}: ${result.keys.sorted().joinToString { "audiogroup$it.dat" }}")
+        }
+        return result
     }
 
     // Scan a directory for audio files (OGG, WAV) and load them into a map keyed by filename

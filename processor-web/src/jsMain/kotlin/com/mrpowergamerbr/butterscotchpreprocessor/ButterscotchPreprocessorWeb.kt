@@ -1,7 +1,10 @@
 package com.mrpowergamerbr.butterscotchpreprocessor
 
 import com.mrpowergamerbr.butterscotchpreprocessor.components.App
+import js.buffer.ArrayBufferLike
+import js.objects.Object
 import js.objects.unsafeJso
+import js.typedarrays.Int8Array
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,9 +45,20 @@ class ButterscotchPreprocessorWeb {
                         externalAudioFiles[key] = js("new Int8Array(audioData)").unsafeCast<ByteArray>()
                     }
 
+                    // Receive audiogroup files
+                    val audioGroupObj: dynamic = msg.audioGroups
+                    val audioGroupFiles = HashMap<Int, ByteArray>()
+                    if (audioGroupObj != null && audioGroupObj != undefined) {
+                        val agKeys = Object.keys(audioGroupObj)
+                        for (key in agKeys) {
+                            val groupData = audioGroupObj[key]
+                            audioGroupFiles[key.toInt()] = Int8Array(groupData as ArrayBufferLike).unsafeCast<ByteArray>()
+                        }
+                    }
+
                     scope.launch {
                         try {
-                            val result = processDataWin(bytes, externalAudioFiles) { progressMsg ->
+                            val result = processDataWin(bytes, externalAudioFiles, audioGroupFiles) { progressMsg ->
                                 self.postMessage(
                                     unsafeJso {
                                         this.type = "progress"
