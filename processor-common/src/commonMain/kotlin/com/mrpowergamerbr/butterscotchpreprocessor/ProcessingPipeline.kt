@@ -22,7 +22,7 @@ private class AudioData(
     val data: ByteArray      // Raw PCM, raw OGG, or ADPCM encoded data
 )
 
-private data class TileKey(val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
+private data class TileKey(val useSpriteDefinition: Boolean, val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
 private data class CropInfo(val offsetX: Int, val offsetY: Int, val croppedWidth: Int, val croppedHeight: Int)
 
 suspend fun processDataWin(
@@ -117,42 +117,50 @@ suspend fun processDataWin(
 
     // Collect unique tiles (from legacy tiles and GMS2 asset layers)
     val uniqueTiles = LinkedHashMap<TileKey, RoomTile>()
-    for (room in dw.room.rooms) {
-        // Legacy tiles (GMS1 and GMS2)
-        for (tile in room.tiles) {
-            if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= dw.bgnd.backgrounds.size) continue
-            val key = TileKey(tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height)
-            if (key !in uniqueTiles) {
-                uniqueTiles[key] = tile
-            }
+    fun collectTile(tile: RoomTile) {
+        val defCount = if (tile.useSpriteDefinition) dw.sprt.sprites.size else dw.bgnd.backgrounds.size
+        if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= defCount) return
+        val key = TileKey(tile.useSpriteDefinition, tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height)
+        if (key !in uniqueTiles) {
+            uniqueTiles[key] = tile
         }
-        // GMS2 asset layer legacy tiles
+    }
+    for (room in dw.room.rooms) {
+        for (tile in room.tiles) collectTile(tile)
         for (layer in room.layers) {
             val assets = layer.assetsData ?: continue
-            for (tile in assets.legacyTiles) {
-                if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= dw.bgnd.backgrounds.size) continue
-                val key = TileKey(tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height)
-                if (key !in uniqueTiles) {
-                    uniqueTiles[key] = tile
-                }
-            }
+            for (tile in assets.legacyTiles) collectTile(tile)
         }
     }
-    val bgImages = HashMap<Int, PixelImage>()
+    // Extract source images for tiles (background or sprite depending on useSpriteDefinition)
+    data class TileSourceKey(val useSpriteDefinition: Boolean, val defIndex: Int)
+    val tileSourceImages = HashMap<TileSourceKey, PixelImage>()
     for ((key, _) in uniqueTiles) {
-        if (bgImages.containsKey(key.bgDef)) continue
-        val bg = dw.bgnd.backgrounds[key.bgDef]
-        val tpagIdx = dw.resolveTPAG(bg.textureOffset)
+        val srcKey = TileSourceKey(key.useSpriteDefinition, key.bgDef)
+        if (tileSourceImages.containsKey(srcKey)) continue
+        val tpagIdx = if (key.useSpriteDefinition) {
+            val sprite = dw.sprt.sprites[key.bgDef]
+            if (sprite.textureOffsets.isEmpty()) continue
+            dw.resolveTPAG(sprite.textureOffsets[0])
+        } else {
+            val bg = dw.bgnd.backgrounds[key.bgDef]
+            dw.resolveTPAG(bg.textureOffset)
+        }
         if (0 > tpagIdx) continue
-        bgImages[key.bgDef] = extractFromTPAG(dw.tpag.items[tpagIdx], texturePages)
+        tileSourceImages[srcKey] = extractFromTPAG(dw.tpag.items[tpagIdx], texturePages)
     }
     for ((key, _) in uniqueTiles) {
-        val bgImg = bgImages[key.bgDef] ?: continue
-        if (key.srcX + key.w > bgImg.width || key.srcY + key.h > bgImg.height) continue
+        val srcKey = TileSourceKey(key.useSpriteDefinition, key.bgDef)
+        val srcImg = tileSourceImages[srcKey] ?: continue
+        if (key.srcX + key.w > srcImg.width || key.srcY + key.h > srcImg.height) continue
         if (key.w == 0 || key.h == 0) continue
-        val tileImg = extractSubImage(bgImg, key.srcX, key.srcY, key.w, key.h)
-        val bgName = dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
-        val imgName = "tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
+        val tileImg = extractSubImage(srcImg, key.srcX, key.srcY, key.w, key.h)
+        val defName = if (key.useSpriteDefinition) {
+            dw.sprt.sprites[key.bgDef].name ?: "spr${key.bgDef}"
+        } else {
+            dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
+        }
+        val imgName = "tile/${defName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
         allImages.add(imgName to tileImg)
         atlasGroupKeys[imgName] = imgName
     }
@@ -651,8 +659,12 @@ private fun writeAtlasMetadataBytes(
 
     // Tile entries
     for ((key, _) in uniqueTiles) {
-        val bgName = dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
-        val imgName = "tile/${bgName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
+        val defName = if (key.useSpriteDefinition) {
+            dw.sprt.sprites[key.bgDef].name ?: "spr${key.bgDef}"
+        } else {
+            dw.bgnd.backgrounds[key.bgDef].name ?: "bg${key.bgDef}"
+        }
+        val imgName = "tile/${defName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
         val pair = atlasEntryMap[imgName]
         val atlas = pair?.first
         val entry = pair?.second

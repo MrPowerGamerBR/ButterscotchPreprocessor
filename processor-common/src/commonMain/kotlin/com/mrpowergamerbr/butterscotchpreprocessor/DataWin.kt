@@ -488,6 +488,7 @@ class RoomGameObject {
 class RoomTile {
     var x = 0
     var y = 0
+    var useSpriteDefinition = false
     var backgroundDefinition = 0
     var sourceX = 0
     var sourceY = 0
@@ -1259,7 +1260,7 @@ class DataWin {
                     val tilePtrs = reader.readPointerTable()
                     tiles = tilePtrs.map { tilePtr ->
                         reader.position = tilePtr
-                        readRoomTile(reader)
+                        readRoomTile(reader, dw)
                     }
 
                     // GMS2 layers
@@ -1288,7 +1289,7 @@ class DataWin {
                                         val assetTilePtrs = reader.readPointerTable()
                                         val assetTiles = assetTilePtrs.map { tp ->
                                             reader.position = tp
-                                            readRoomTile(reader)
+                                            readRoomTile(reader, dw)
                                         }
                                         assetsData = RoomLayerAssetsData().apply {
                                             legacyTiles = assetTiles
@@ -1316,10 +1317,11 @@ class DataWin {
             }
         }
 
-        private fun readRoomTile(reader: BinaryReader): RoomTile {
+        private fun readRoomTile(reader: BinaryReader, dw: DataWin): RoomTile {
             return RoomTile().apply {
                 x = reader.readInt32()
                 y = reader.readInt32()
+                useSpriteDefinition = dw.gen8.major >= 2
                 backgroundDefinition = reader.readInt32()
                 sourceX = reader.readInt32()
                 sourceY = reader.readInt32()
