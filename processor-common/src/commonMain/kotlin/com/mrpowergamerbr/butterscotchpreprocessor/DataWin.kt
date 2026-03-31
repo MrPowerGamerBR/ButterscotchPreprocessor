@@ -59,6 +59,7 @@ class Gen8 {
     var steamAppID = 0
     var debuggerPort = 0
     var roomOrder = intArrayOf()
+    var gms2FPS = 0f
 }
 
 // ===[ OPTN ]===
@@ -141,6 +142,10 @@ class Sprite {
     var sepMasks = 0
     var originX = 0
     var originY = 0
+    var sVersion = 0
+    var sSpriteType = 0
+    var gms2PlaybackSpeed = 0f
+    var gms2PlaybackSpeedType = false
     var textureOffsets = intArrayOf()
     var masks: List<ByteArray>? = null
 }
@@ -150,7 +155,23 @@ class Sprt {
 }
 
 // ===[ BGND ]===
-class Background(val name: String?, val transparent: Boolean, val smooth: Boolean, val preload: Boolean, val textureOffset: Int)
+class Background {
+    var name: String? = null
+    var transparent = false
+    var smooth = false
+    var preload = false
+    var textureOffset = 0
+    // GMS2 tile set fields
+    var gms2TileWidth = 0
+    var gms2TileHeight = 0
+    var gms2OutputBorderX = 0
+    var gms2OutputBorderY = 0
+    var gms2TileColumns = 0
+    var gms2ItemsPerTileCount = 0
+    var gms2TileCount = 0
+    var gms2FrameLength = 0L
+    var gms2TileIds = intArrayOf()
+}
 
 class Bgnd {
     var backgrounds = emptyList<Background>()
@@ -479,6 +500,36 @@ class RoomTile {
     var color = 0
 }
 
+// GMS2 room layer types
+object RoomLayerType {
+    const val BACKGROUND = 1
+    const val INSTANCES = 2
+    const val ASSETS = 3
+    const val PATH = 6
+}
+
+class RoomLayerAssetsData {
+    var legacyTiles = emptyList<RoomTile>()
+}
+
+class RoomLayerBackgroundData {
+    var spriteIndex = -1
+}
+
+class RoomLayer {
+    var name: String? = null
+    var id = 0
+    var type = 0
+    var depth = 0
+    var xOffset = 0f
+    var yOffset = 0f
+    var hSpeed = 0f
+    var vSpeed = 0f
+    var visible = false
+    var assetsData: RoomLayerAssetsData? = null
+    var backgroundData: RoomLayerBackgroundData? = null
+}
+
 class Room {
     var name: String? = null
     var caption: String? = null
@@ -502,6 +553,7 @@ class Room {
     var views = Array(8) { RoomView() }
     var gameObjects = emptyList<RoomGameObject>()
     var tiles = emptyList<RoomTile>()
+    var layers = emptyList<RoomLayer>()
 }
 
 class RoomChunk {
@@ -726,6 +778,14 @@ class DataWin {
             g.debuggerPort = reader.readInt32()
             val roomOrderCount = reader.readInt32()
             g.roomOrder = IntArray(roomOrderCount) { reader.readInt32() }
+
+            if (g.major >= 2) {
+                reader.skip(8)    // firstRandom (int64)
+                reader.skip(8 * 4) // 4 Random Entries
+                g.gms2FPS = reader.readFloat32()
+                reader.skip(4)    // AllowStatistics (bool32)
+                reader.skip(16)   // GameGUID (16 bytes)
+            }
         }
 
         private fun parseOPTN(reader: BinaryReader, dw: DataWin) {
@@ -844,11 +904,26 @@ class DataWin {
                     originX = reader.readInt32()
                     originY = reader.readInt32()
 
-                    // Detect special type vs normal
-                    val check = reader.readInt32()
-                    require(check != -1) { "SPRT: unexpected special type sprite '$name' (GMS2 format not supported)" }
+                    // Detect special type (GMS2) vs normal: peek next int32
+                    var textureCount = reader.readInt32()
+                    if (textureCount == -1) {
+                        // GMS2 special type sprite
+                        sVersion = reader.readInt32()
+                        sSpriteType = reader.readInt32()
+                        if (dw.gen8.major >= 2) {
+                            gms2PlaybackSpeed = reader.readFloat32()
+                            gms2PlaybackSpeedType = reader.readBool32()
+                            if (sVersion >= 2) {
+                                reader.skip(4) // sequenceOffset
+                                if (sVersion >= 3) {
+                                    reader.skip(4) // nineSliceOffset
+                                }
+                            }
+                        }
+                        textureCount = reader.readInt32()
+                    }
 
-                    textureOffsets = IntArray(check) { reader.readInt32() }
+                    textureOffsets = IntArray(textureCount) { reader.readInt32() }
 
                     // Collision masks
                     val maskDataCount = reader.readInt32()
@@ -878,13 +953,27 @@ class DataWin {
             val ptrs = reader.readPointerTable()
             dw.bgnd.backgrounds = ptrs.map { ptr ->
                 reader.position = ptr
-                Background(
-                    reader.readStringPtr(),
-                    reader.readBool32(),
-                    reader.readBool32(),
-                    reader.readBool32(),
-                    reader.readInt32()
-                )
+                Background().apply {
+                    name = reader.readStringPtr()
+                    transparent = reader.readBool32()
+                    smooth = reader.readBool32()
+                    preload = reader.readBool32()
+                    textureOffset = reader.readInt32()
+                    if (dw.gen8.major >= 2) {
+                        reader.skip(4) // gms2UnknownAlways2
+                        gms2TileWidth = reader.readInt32()
+                        gms2TileHeight = reader.readInt32()
+                        gms2OutputBorderX = reader.readInt32()
+                        gms2OutputBorderY = reader.readInt32()
+                        gms2TileColumns = reader.readInt32()
+                        gms2ItemsPerTileCount = reader.readInt32()
+                        gms2TileCount = reader.readInt32()
+                        reader.skip(4) // gms2ExportedSpriteIndex
+                        gms2FrameLength = reader.readLong()
+                        val tileIdCount = gms2TileCount * gms2ItemsPerTileCount
+                        gms2TileIds = IntArray(tileIdCount) { reader.readInt32() }
+                    }
+                }
             }
         }
 
@@ -1091,6 +1180,15 @@ class DataWin {
                     gravityY = reader.readFloat32()
                     metersPerPixel = reader.readFloat32()
 
+                    // GMS2: read layers pointer from header
+                    var layersPtr = 0
+                    if (dw.gen8.major >= 2) {
+                        layersPtr = reader.readInt32()
+                        if (dw.gen8.minor >= 3) {
+                            reader.skip(4) // sequencesPtr
+                        }
+                    }
+
                     // Backgrounds (always 8)
                     reader.position = backgroundsPtr
                     val bgPtrs = reader.readPointerTable()
@@ -1161,22 +1259,77 @@ class DataWin {
                     val tilePtrs = reader.readPointerTable()
                     tiles = tilePtrs.map { tilePtr ->
                         reader.position = tilePtr
-                        RoomTile().apply {
-                            x = reader.readInt32()
-                            y = reader.readInt32()
-                            backgroundDefinition = reader.readInt32()
-                            sourceX = reader.readInt32()
-                            sourceY = reader.readInt32()
-                            width = reader.readInt32()
-                            height = reader.readInt32()
-                            tileDepth = reader.readInt32()
-                            instanceID = reader.readInt32()
-                            scaleX = reader.readFloat32()
-                            scaleY = reader.readFloat32()
-                            color = reader.readInt32()
+                        readRoomTile(reader)
+                    }
+
+                    // GMS2 layers
+                    if (dw.gen8.major >= 2 && layersPtr != 0) {
+                        reader.position = layersPtr
+                        val layerPtrs = reader.readPointerTable()
+                        layers = layerPtrs.map { layerPtr ->
+                            reader.position = layerPtr
+                            RoomLayer().apply {
+                                name = reader.readStringPtr()
+                                id = reader.readInt32()
+                                type = reader.readInt32()
+                                depth = reader.readInt32()
+                                xOffset = reader.readFloat32()
+                                yOffset = reader.readFloat32()
+                                hSpeed = reader.readFloat32()
+                                vSpeed = reader.readFloat32()
+                                visible = reader.readBool32()
+
+                                when (type) {
+                                    RoomLayerType.ASSETS -> {
+                                        val legacyTilesPtr = reader.readInt32()
+                                        val spritesPtr = reader.readInt32()
+
+                                        reader.position = legacyTilesPtr
+                                        val assetTilePtrs = reader.readPointerTable()
+                                        val assetTiles = assetTilePtrs.map { tp ->
+                                            reader.position = tp
+                                            readRoomTile(reader)
+                                        }
+                                        assetsData = RoomLayerAssetsData().apply {
+                                            legacyTiles = assetTiles
+                                        }
+                                        // Skip sprite instances (not needed for preprocessing)
+                                    }
+                                    RoomLayerType.BACKGROUND -> {
+                                        reader.skip(4 * 2) // visible, foreground
+                                        backgroundData = RoomLayerBackgroundData().apply {
+                                            spriteIndex = reader.readInt32()
+                                        }
+                                        // Skip remaining background layer fields
+                                    }
+                                    RoomLayerType.INSTANCES -> {
+                                        // Skip instance list (not needed for preprocessing)
+                                    }
+                                    RoomLayerType.PATH -> {
+                                        // Nothing to parse
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+            }
+        }
+
+        private fun readRoomTile(reader: BinaryReader): RoomTile {
+            return RoomTile().apply {
+                x = reader.readInt32()
+                y = reader.readInt32()
+                backgroundDefinition = reader.readInt32()
+                sourceX = reader.readInt32()
+                sourceY = reader.readInt32()
+                width = reader.readInt32()
+                height = reader.readInt32()
+                tileDepth = reader.readInt32()
+                instanceID = reader.readInt32()
+                scaleX = reader.readFloat32()
+                scaleY = reader.readFloat32()
+                color = reader.readInt32()
             }
         }
 
@@ -1273,11 +1426,16 @@ class DataWin {
             val ptrs = reader.readPointerTable()
             if (ptrs.isEmpty()) return
 
+            val hasGeneratedMips = dw.gen8.major >= 2
+
             // Read metadata
             data class TexMeta(val scaled: Int, val blobOffset: Int)
             val metas = ptrs.map { ptr ->
                 reader.position = ptr
-                TexMeta(reader.readInt32(), reader.readInt32())
+                val scaled = reader.readInt32()
+                if (hasGeneratedMips) reader.skip(4) // generatedMips
+                val blobOffset = reader.readInt32()
+                TexMeta(scaled, blobOffset)
             }
 
             // Compute blob sizes from successive offsets

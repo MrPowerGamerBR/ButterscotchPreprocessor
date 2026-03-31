@@ -115,14 +115,26 @@ suspend fun processDataWin(
         tpagIndexMap[imgName] = tpagIdx
     }
 
-    // Collect unique tiles
+    // Collect unique tiles (from legacy tiles and GMS2 asset layers)
     val uniqueTiles = LinkedHashMap<TileKey, RoomTile>()
     for (room in dw.room.rooms) {
+        // Legacy tiles (GMS1 and GMS2)
         for (tile in room.tiles) {
             if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= dw.bgnd.backgrounds.size) continue
             val key = TileKey(tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height)
             if (key !in uniqueTiles) {
                 uniqueTiles[key] = tile
+            }
+        }
+        // GMS2 asset layer legacy tiles
+        for (layer in room.layers) {
+            val assets = layer.assetsData ?: continue
+            for (tile in assets.legacyTiles) {
+                if (0 > tile.backgroundDefinition || tile.backgroundDefinition >= dw.bgnd.backgrounds.size) continue
+                val key = TileKey(tile.backgroundDefinition, tile.sourceX, tile.sourceY, tile.width, tile.height)
+                if (key !in uniqueTiles) {
+                    uniqueTiles[key] = tile
+                }
             }
         }
     }
