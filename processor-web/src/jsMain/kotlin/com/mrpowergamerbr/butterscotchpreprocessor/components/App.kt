@@ -75,6 +75,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
     var processing by remember { mutableStateOf(false) }
     var loadedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var loadedExternalAudio by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
+    var loadedSourceFiles by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
     var deferDrawToAfterAllSteps by remember { mutableStateOf(true) }
     val controllerMappings = remember {
@@ -176,6 +177,20 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                     volumeId = gameName.uppercase().take(32),
                                     systemId = "PLAYSTATION"
                                 )
+                                // Collect files mapped to $BOOT that should be included in the ISO
+                                val bootFiles = filesystemMappings
+                                    .filter { it.value.startsWith("\$BOOT:") }
+                                    .mapNotNull { (sourceFile, targetPath) ->
+                                        val isoFileName = targetPath.removePrefix("\$BOOT:")
+                                        val fileBytes = loadedSourceFiles[sourceFile]
+                                        if (fileBytes != null) {
+                                            Iso9660Creator.IsoFile(isoFileName, fileBytes)
+                                        } else {
+                                            logMessages.add("Warning: Source file \"$sourceFile\" not found in folder, skipping \$BOOT mapping")
+                                            null
+                                        }
+                                    }
+
                                 val isoBytes = iso.create(listOf(
                                     Iso9660Creator.IsoFile("SYSTEM.CNF", systemCnf.encodeToByteArray()),
                                     Iso9660Creator.IsoFile("BUTR_000.00", elfBytes),
@@ -227,7 +242,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                         }
                                     }.toString().encodeToByteArray()),
                                     Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
-                                ))
+                                ) + bootFiles)
 
                                 isoFileName = "${gameName}.iso"
                                 val blob = Blob(arrayOf(isoBytes), BlobPropertyBag(type = "application/octet-stream"))
@@ -267,14 +282,20 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 logMessages.clear()
                 parsedGameName = null
                 loadedExternalAudio = emptyMap()
+                loadedSourceFiles = emptyMap()
                 status = "Reading folder..."
 
                 scope.launch {
                     try {
-                        // Find the data.win file and collect audio files
+                        // Find the data.win file, collect audio files, and other source files
                         var dataWinFile: dynamic = null
                         val audioFiles = HashMap<String, dynamic>()
+                        val otherFiles = HashMap<String, dynamic>()
                         val fileCount = files.length as Int
+
+                        // Get the root folder name from the first file's webkitRelativePath
+                        val firstFile: dynamic = files[0]
+                        val rootFolderPrefix = (firstFile.webkitRelativePath as String).substringBefore("/") + "/"
 
                         for (i in 0 until fileCount) {
                             val file: dynamic = files[i]
@@ -283,6 +304,10 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 dataWinFile = file
                             } else if (name.endsWith(".ogg") || name.endsWith(".wav")) {
                                 audioFiles[file.name as String] = file
+                            } else {
+                                // Use relative path (minus root folder) to preserve directory structure
+                                val relativePath = (file.webkitRelativePath as String).removePrefix(rootFolderPrefix)
+                                otherFiles[relativePath] = file
                             }
                         }
 
@@ -303,6 +328,16 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 externalAudio[fileName] = readFileAsBytes(file)
                             }
                             loadedExternalAudio = externalAudio
+                        }
+
+                        // Load other source files (for $BOOT filesystem mappings)
+                        if (otherFiles.isNotEmpty()) {
+                            status = "Reading ${otherFiles.size} other files..."
+                            val sourceFiles = HashMap<String, ByteArray>()
+                            for ((fileName, file) in otherFiles) {
+                                sourceFiles[fileName] = readFileAsBytes(file)
+                            }
+                            loadedSourceFiles = sourceFiles
                         }
 
                         // Quick parse to get game name
@@ -340,6 +375,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         status = "Error reading folder: ${e.message}"
                         loadedFileBytes = null
                         loadedExternalAudio = emptyMap()
+                        loadedSourceFiles = emptyMap()
                     }
                 }
             }

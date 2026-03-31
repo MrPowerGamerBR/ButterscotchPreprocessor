@@ -1,7 +1,9 @@
 package com.mrpowergamerbr.butterscotchpreprocessor
 
 /**
- * Creates simple ISO 9660 images with a flat file structure (no subdirectories).
+ * Creates ISO 9660 images.
+ *
+ * File names may contain "/" to place files in subdirectories (e.g. "LANG/LANG_EN.JSON").
  *
  * Equivalent to: mkisofs -o output.iso -V volumeId -sysid systemId -l -allow-lowercase files...
  */
@@ -16,6 +18,21 @@ class Iso9660Creator(
 
     class IsoFile(val name: String, val data: ByteArray)
 
+    private class DirInfo(
+        val name: String,       // Directory name ("" for root)
+        val parentIndex: Int,   // Index in the directories list (0 = root, root's parent is itself)
+        val entries: MutableList<DirEntryInfo> = mutableListOf(),
+        var sector: Int = 0,
+        var sizeInBytes: Int = 0
+    ) {
+        val sectorCount get() = (sizeInBytes + SECTOR_SIZE - 1) / SECTOR_SIZE
+    }
+
+    private sealed class DirEntryInfo(val name: String) {
+        class File(name: String, val isoFile: IsoFile, var sector: Int = 0, var sectorCount: Int = 0) : DirEntryInfo(name)
+        class Subdirectory(name: String, val dirIndex: Int) : DirEntryInfo(name)
+    }
+
     fun create(files: List<IsoFile>): ByteArray {
         // Layout:
         // Sectors 0-15:  System Area (zeros)
@@ -23,29 +40,88 @@ class Iso9660Creator(
         // Sector 17:     Volume Descriptor Set Terminator
         // Sector 18:     L Path Table (Little Endian)
         // Sector 19:     M Path Table (Big Endian)
-        // Sector 20:     Root Directory
-        // Sector 21+:    File data
+        // Sector 20+:    Directory records (root + subdirectories)
+        // After dirs:    File data
 
-        val rootDirSector = 20
-        val rootDirSectors = 1
-        var nextDataSector = rootDirSector + rootDirSectors
+        // ---- Phase 1: Build directory tree from file paths ----
+        val directories = mutableListOf<DirInfo>()
+        val dirsByPath = mutableMapOf<String, Int>()
 
-        // Calculate file placements
-        data class FilePlacement(val file: IsoFile, val sector: Int, val sectorCount: Int)
+        // Root directory (index 0, parent is itself)
+        directories.add(DirInfo("", 0))
+        dirsByPath[""] = 0
 
-        val placements = mutableListOf<FilePlacement>()
-        for (f in files) {
-            val sectorCount = (f.data.size + SECTOR_SIZE - 1) / SECTOR_SIZE
-            placements.add(FilePlacement(f, nextDataSector, if (f.data.size > 0) sectorCount.coerceAtLeast(1) else 1))
-            nextDataSector += placements.last().sectorCount
+        for (file in files) {
+            val slashIndex = file.name.lastIndexOf('/')
+            val dirPath: String
+            val fileName: String
+            if (slashIndex >= 0) {
+                dirPath = file.name.substring(0, slashIndex)
+                fileName = file.name.substring(slashIndex + 1)
+            } else {
+                dirPath = ""
+                fileName = file.name
+            }
+
+            // Create any missing parent directories
+            if (dirPath.isNotEmpty() && !dirsByPath.containsKey(dirPath)) {
+                val parts = dirPath.split("/")
+                var currentPath = ""
+                for (part in parts) {
+                    val parentPath = currentPath
+                    currentPath = if (currentPath.isEmpty()) part else "$currentPath/$part"
+                    if (!dirsByPath.containsKey(currentPath)) {
+                        val parentIndex = dirsByPath[parentPath]!!
+                        val newIndex = directories.size
+                        directories.add(DirInfo(part, parentIndex))
+                        dirsByPath[currentPath] = newIndex
+                        directories[parentIndex].entries.add(DirEntryInfo.Subdirectory(part, newIndex))
+                    }
+                }
+            }
+
+            // Add file entry to its parent directory
+            val dirIndex = dirsByPath[dirPath]!!
+            directories[dirIndex].entries.add(DirEntryInfo.File(fileName, file))
         }
 
-        val totalSectors = nextDataSector
-        val pathTableSize = 10 // single root directory entry: 1 + 1 + 4 + 2 + 1 + 1(padding)
+        // ---- Phase 2: Calculate layout ----
+        // Calculate the size (in bytes, sector-aligned) of each directory's record area
+        for (dir in directories) {
+            dir.sizeInBytes = calculateDirectorySize(dir)
+        }
+
         val lPathTableSector = 18
         val mPathTableSector = 19
+        var nextSector = 20
+
+        // Assign sectors to each directory
+        for (dir in directories) {
+            dir.sector = nextSector
+            nextSector += dir.sectorCount
+        }
+
+        // Assign sectors to each file
+        val allFiles = mutableListOf<DirEntryInfo.File>()
+        for (dir in directories) {
+            for (entry in dir.entries) {
+                if (entry is DirEntryInfo.File) {
+                    val sectorCount = ((entry.isoFile.data.size + SECTOR_SIZE - 1) / SECTOR_SIZE).coerceAtLeast(1)
+                    entry.sector = nextSector
+                    entry.sectorCount = sectorCount
+                    nextSector += sectorCount
+                    allFiles.add(entry)
+                }
+            }
+        }
+
+        val totalSectors = nextSector
+        val pathTableSize = calculatePathTableSize(directories)
+        val rootDir = directories[0]
 
         val writer = ByteWriter(totalSectors * SECTOR_SIZE)
+
+        // ---- Phase 3: Write ----
 
         // ---- System Area (sectors 0-15) ----
         writer.writeZeroPadding(SECTOR_SIZE * SYSTEM_AREA_SECTORS)
@@ -71,7 +147,7 @@ class Iso9660Creator(
         writeInt32BE(writer, 0) // Optional Type M Path Table Location
 
         // Root Directory Record (inline in PVD, 34 bytes)
-        writeDirectoryRecord(writer, rootDirSector, SECTOR_SIZE, 0x02, byteArrayOf(0x00))
+        writeDirectoryRecord(writer, rootDir.sector, rootDir.sizeInBytes, 0x02, byteArrayOf(0x00))
 
         writePaddedString(writer, "", 128) // Volume Set Identifier
         writePaddedString(writer, "", 128) // Publisher Identifier
@@ -99,53 +175,145 @@ class Iso9660Creator(
 
         // ---- L Path Table (sector 18, Little Endian) ----
         val lptStart = writer.size
-        writer.writeByte(0x01) // Length of Directory Identifier
-        writer.writeByte(0x00) // Extended Attribute Record Length
-        writeInt32LE(writer, rootDirSector) // Location of Extent
-        writeInt16LE(writer, 1) // Directory Number of Parent Directory
-        writer.writeByte(0x00) // Directory Identifier (root)
-        writer.writeByte(0x00) // Padding
+        writePathTable(writer, directories, littleEndian = true)
         writer.writeZeroPadding(SECTOR_SIZE - (writer.size - lptStart))
 
         // ---- M Path Table (sector 19, Big Endian) ----
         val mptStart = writer.size
-        writer.writeByte(0x01) // Length of Directory Identifier
-        writer.writeByte(0x00) // Extended Attribute Record Length
-        writeInt32BE(writer, rootDirSector) // Location of Extent
-        writeInt16BE(writer, 1) // Directory Number of Parent Directory
-        writer.writeByte(0x00) // Directory Identifier (root)
-        writer.writeByte(0x00) // Padding
+        writePathTable(writer, directories, littleEndian = false)
         writer.writeZeroPadding(SECTOR_SIZE - (writer.size - mptStart))
 
-        // ---- Root Directory (sector 20) ----
-        val dirStart = writer.size
+        // ---- Directory Records ----
+        for (dir in directories) {
+            val dirStart = writer.size
+            val parentDir = directories[dir.parentIndex]
 
-        // "." entry (self)
-        writeDirectoryRecord(writer, rootDirSector, SECTOR_SIZE, 0x02, byteArrayOf(0x00))
+            // "." entry (self)
+            writeDirectoryRecord(writer, dir.sector, dir.sizeInBytes, 0x02, byteArrayOf(0x00))
 
-        // ".." entry (parent, same as root for top-level)
-        writeDirectoryRecord(writer, rootDirSector, SECTOR_SIZE, 0x02, byteArrayOf(0x01))
+            // ".." entry (parent)
+            writeDirectoryRecord(writer, parentDir.sector, parentDir.sizeInBytes, 0x02, byteArrayOf(0x01))
 
-        // File entries
-        for (p in placements) {
-            val identifier = "${p.file.name};1".encodeToByteArray()
-            writeDirectoryRecord(writer, p.sector, p.file.data.size, 0x00, identifier)
+            // Child entries (subdirectories and files)
+            for (entry in dir.entries) {
+                val identifier: ByteArray
+                val entrySector: Int
+                val dataLength: Int
+                val flags: Int
+
+                when (entry) {
+                    is DirEntryInfo.Subdirectory -> {
+                        val childDir = directories[entry.dirIndex]
+                        identifier = entry.name.encodeToByteArray()
+                        entrySector = childDir.sector
+                        dataLength = childDir.sizeInBytes
+                        flags = 0x02
+                    }
+                    is DirEntryInfo.File -> {
+                        identifier = "${entry.name};1".encodeToByteArray()
+                        entrySector = entry.sector
+                        dataLength = entry.isoFile.data.size
+                        flags = 0x00
+                    }
+                }
+
+                // Directory records cannot span sector boundaries
+                val baseLength = 33 + identifier.size
+                val paddingByte = if (baseLength % 2 != 0) 1 else 0
+                val recordLength = baseLength + paddingByte
+                val sectorOffset = (writer.size - dirStart) % SECTOR_SIZE
+                if (sectorOffset + recordLength > SECTOR_SIZE) {
+                    writer.writeZeroPadding(SECTOR_SIZE - sectorOffset)
+                }
+
+                writeDirectoryRecord(writer, entrySector, dataLength, flags, identifier)
+            }
+
+            // Pad to sector boundary
+            val written = writer.size - dirStart
+            val totalDirSize = dir.sectorCount * SECTOR_SIZE
+            if (totalDirSize > written) {
+                writer.writeZeroPadding(totalDirSize - written)
+            }
         }
 
-        // Pad directory to sector boundary
-        writer.writeZeroPadding(SECTOR_SIZE - (writer.size - dirStart))
-
         // ---- File Data ----
-        for (p in placements) {
-            writer.writeByteArray(p.file.data)
-            val targetSize = p.sectorCount * SECTOR_SIZE
-            val padding = targetSize - p.file.data.size
+        for (entry in allFiles) {
+            writer.writeByteArray(entry.isoFile.data)
+            val targetSize = entry.sectorCount * SECTOR_SIZE
+            val padding = targetSize - entry.isoFile.data.size
             if (padding > 0) {
                 writer.writeZeroPadding(padding)
             }
         }
 
         return writer.getAsByteArray()
+    }
+
+    private fun calculateDirectorySize(dir: DirInfo): Int {
+        var size = 0
+        size += 34 // "." entry (33 + 1 byte identifier)
+        size += 34 // ".." entry (33 + 1 byte identifier)
+
+        for (entry in dir.entries) {
+            val identifier = when (entry) {
+                is DirEntryInfo.Subdirectory -> entry.name.encodeToByteArray()
+                is DirEntryInfo.File -> "${entry.name};1".encodeToByteArray()
+            }
+            val baseLength = 33 + identifier.size
+            val paddingByte = if (baseLength % 2 != 0) 1 else 0
+            val recordLength = baseLength + paddingByte
+
+            // Directory records cannot span sector boundaries
+            val sectorOffset = size % SECTOR_SIZE
+            if (sectorOffset + recordLength > SECTOR_SIZE) {
+                size += SECTOR_SIZE - sectorOffset
+            }
+            size += recordLength
+        }
+
+        // Round up to sector boundary
+        return ((size + SECTOR_SIZE - 1) / SECTOR_SIZE) * SECTOR_SIZE
+    }
+
+    private fun calculatePathTableSize(directories: List<DirInfo>): Int {
+        var size = 0
+        for (dir in directories) {
+            // Root has identifier length 1 (byte 0x00), others use the directory name
+            val nameLength = if (dir.name.isEmpty()) 1 else dir.name.length
+            // 8 fixed bytes + identifier + optional padding to even length
+            size += 8 + nameLength + (if (nameLength % 2 != 0) 1 else 0)
+        }
+        return size
+    }
+
+    private fun writePathTable(writer: ByteWriter, directories: List<DirInfo>, littleEndian: Boolean) {
+        for (dir in directories) {
+            val nameBytes: ByteArray
+            val nameLength: Int
+            if (dir.name.isEmpty()) {
+                // Root directory identifier
+                nameBytes = byteArrayOf(0x00)
+                nameLength = 1
+            } else {
+                nameBytes = dir.name.encodeToByteArray()
+                nameLength = nameBytes.size
+            }
+
+            writer.writeByte(nameLength) // Length of Directory Identifier
+            writer.writeByte(0x00) // Extended Attribute Record Length
+            if (littleEndian) {
+                writeInt32LE(writer, dir.sector)
+                writeInt16LE(writer, dir.parentIndex + 1) // 1-based directory number
+            } else {
+                writeInt32BE(writer, dir.sector)
+                writeInt16BE(writer, dir.parentIndex + 1) // 1-based directory number
+            }
+            writer.writeByteArray(nameBytes)
+            if (nameLength % 2 != 0) {
+                writer.writeByte(0x00) // Padding
+            }
+        }
     }
 
     private fun writeDirectoryRecord(
