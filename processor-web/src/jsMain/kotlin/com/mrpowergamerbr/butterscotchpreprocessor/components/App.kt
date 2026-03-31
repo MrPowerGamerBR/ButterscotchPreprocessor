@@ -18,8 +18,12 @@ import com.mrpowergamerbr.butterscotchpreprocessor.components.colorpicker.Color
 import com.mrpowergamerbr.butterscotchpreprocessor.components.colorpicker.ColorPicker
 import com.mrpowergamerbr.butterscotchpreprocessor.plausible
 import com.mrpowergamerbr.butterscotchpreprocessor.utils.SVGIconManager
+import js.buffer.ArrayBuffer
+import js.buffer.ArrayBufferLike
+import js.core.JsUByte
 import js.date.Date
 import js.objects.unsafeJso
+import js.typedarrays.Uint8Array
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.add
@@ -46,11 +50,15 @@ import org.jetbrains.compose.web.dom.TextInput
 import org.jetbrains.compose.web.dom.Th
 import org.jetbrains.compose.web.dom.Thead
 import org.jetbrains.compose.web.dom.Tr
-import org.w3c.dom.url.URL
-import org.w3c.files.Blob
-import org.w3c.files.BlobPropertyBag
-import org.w3c.files.FileReader
+import web.blob.Blob
+import web.blob.BlobPropertyBag
+import web.dom.ElementId
 import web.dom.document
+import web.events.EventHandler
+import web.file.FileReader
+import web.http.arrayBuffer
+import web.http.fetch
+import web.url.URL
 import web.workers.Worker
 import kotlin.collections.component1
 import kotlin.collections.component2
@@ -837,7 +845,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 DiscordButtonType.PRIMARY,
                                 {
                                     onClick {
-                                        js("document.getElementById('custom-icon-input').click()")
+                                        document.getElementById(ElementId("custom-icon-input"))!!.click()
                                     }
                                 }
                             ) {
@@ -924,7 +932,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 DiscordButtonType.PRIMARY,
                                 {
                                     onClick {
-                                        js("document.getElementById('custom-elf-input').click()")
+                                        document.getElementById(ElementId("custom-elf-input"))!!.click()
                                     }
                                 }
                             ) {
@@ -947,9 +955,11 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
                     // Build external audio map as a JS object for the worker
                     val externalAudio = loadedExternalAudio
-                    val audioObj: dynamic = js("{}")
-                    for ((name, data) in externalAudio) {
-                        audioObj[name] = data
+
+                    val audioObj = unsafeJso<dynamic> {
+                        for ((name, data) in externalAudio) {
+                            this[name] = data
+                        }
                     }
 
                     // Send data to worker (no transfer - we need the bytes later for the ISO)
@@ -1014,17 +1024,17 @@ private fun jsInt8ArrayToByteArray(int8Array: dynamic): ByteArray {
 private suspend fun readFileAsBytes(file: dynamic): ByteArray {
     return suspendCancellableCoroutine { cont ->
         val reader = FileReader()
-        reader.onload = {
-            val arrayBuffer = reader.result
-            val uint8Array = js("new Uint8Array(arrayBuffer)")
+        reader.onload = EventHandler {
+            val arrayBuffer = reader.result as ArrayBuffer
+            val uint8Array = Uint8Array(arrayBuffer)
             val length = uint8Array.length as Int
             val bytes = ByteArray(length)
             for (i in 0 until length) {
-                bytes[i] = (uint8Array[i] as Int).toByte()
+                bytes[i] = uint8Array[i].toByte()
             }
             cont.resume(bytes)
         }
-        reader.onerror = {
+        reader.onerror = EventHandler {
             cont.resumeWithException(RuntimeException("Failed to read file"))
         }
         reader.readAsArrayBuffer(file)
@@ -1032,28 +1042,17 @@ private suspend fun readFileAsBytes(file: dynamic): ByteArray {
 }
 
 private suspend fun fetchResourceBytes(path: String): ByteArray {
-    return suspendCancellableCoroutine { cont ->
-        val xhr = js("new XMLHttpRequest()")
-        xhr.open("GET", path, true)
-        xhr.responseType = "arraybuffer"
-        xhr.onload = {
-            val status = xhr.status as Int
-            if (200 > status || status >= 300) {
-                cont.resumeWithException(RuntimeException("Failed to fetch $path: HTTP $status"))
-            } else {
-                val arrayBuffer = xhr.response
-                val uint8Array = js("new Uint8Array(arrayBuffer)")
-                val length = uint8Array.length as Int
-                val bytes = ByteArray(length)
-                for (i in 0 until length) {
-                    bytes[i] = (uint8Array[i] as Int).toByte()
-                }
-                cont.resume(bytes)
-            }
-        }
-        xhr.onerror = {
-            cont.resumeWithException(RuntimeException("Failed to fetch $path"))
-        }
-        xhr.send()
+    val httpResult = fetch(path)
+    val status = httpResult.status
+    if (200 > status || status >= 300)
+        error("Failed to fetch $path: HTTP $status")
+
+    val arrayBuffer = httpResult.arrayBuffer()
+    val uint8Array = Uint8Array(arrayBuffer)
+    val length = uint8Array.length
+    val bytes = ByteArray(length)
+    for (i in 0 until length) {
+        bytes[i] = uint8Array[i].toByte()
     }
+    return bytes
 }
