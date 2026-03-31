@@ -1,59 +1,72 @@
 package com.mrpowergamerbr.butterscotchpreprocessor
 
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.main
+import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.path
 import kotlinx.coroutines.runBlocking
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.nio.file.Path
 import javax.imageio.ImageIO
+import kotlin.io.path.createDirectories
 
-object ButterscotchPreprocessor {
-    @JvmStatic
-    fun main(args: Array<String>) {
-        if (args.isEmpty()) {
-            println("Usage: ButterscotchPreprocessor <path/to/data.win>")
-            return
-        }
+class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor") {
+    val dataWinPath by argument(help = "Path to the data.win file")
+        .path(mustExist = true, canBeDir = false)
 
-        val dataWinPath = args[0]
-        val dataWinFile = File(dataWinPath)
-        println("Parsing $dataWinPath...")
+    val outputDir by option("-o", "--output", help = "Output directory for processed files")
+        .path()
+        .default(Path.of("output"))
+
+    override fun run() {
+        val dataWinFile = dataWinPath.toFile()
+        echo("Parsing $dataWinPath...")
 
         val bytes = dataWinFile.readBytes()
         val dataWinDir = dataWinFile.parentFile ?: File(".")
-        val outputDir = File("/home/mrpowergamerbr/Projects/Butterscotch/build-ps2/ISOTest/")
-        outputDir.mkdirs()
+        val outputDirFile = outputDir.toFile()
+        outputDir.createDirectories()
 
         // Debug dumps (JVM-only, using ImageIO)
-        dumpDebugImages(bytes, outputDir)
+        dumpDebugImages(bytes, outputDirFile)
 
         // Load external audio files from the same directory as data.win
         val externalAudioFiles = loadExternalAudioFiles(dataWinDir)
 
         // Core processing via common pipeline
         val result = runBlocking {
-            processDataWin(bytes, externalAudioFiles) { println(it) }
+            processDataWin(bytes, externalAudioFiles) { echo(it) }
         }
 
         // Write output files
-        File(outputDir, "CLUT4.BIN").writeBytes(result.clut4Bin)
-        File(outputDir, "CLUT8.BIN").writeBytes(result.clut8Bin)
-        File(outputDir, "TEXTURES.BIN").writeBytes(result.texturesBin)
-        File(outputDir, "ATLAS.BIN").writeBytes(result.atlasBin)
-        File(outputDir, "SOUNDBNK.BIN").writeBytes(result.soundBnkBin)
-        File(outputDir, "SOUNDS.BIN").writeBytes(result.soundsBin)
+        File(outputDirFile, "CLUT4.BIN").writeBytes(result.clut4Bin)
+        File(outputDirFile, "CLUT8.BIN").writeBytes(result.clut8Bin)
+        File(outputDirFile, "TEXTURES.BIN").writeBytes(result.texturesBin)
+        File(outputDirFile, "ATLAS.BIN").writeBytes(result.atlasBin)
+        File(outputDirFile, "SOUNDBNK.BIN").writeBytes(result.soundBnkBin)
+        File(outputDirFile, "SOUNDS.BIN").writeBytes(result.soundsBin)
 
         // Dump debug atlas images
-        val atlasDebugDir = File(outputDir, "atlas_debug")
+        val atlasDebugDir = File(outputDirFile, "atlas_debug")
         atlasDebugDir.mkdirs()
         for (atlas in result.atlases) {
             val debugImg = renderAtlasDebug(atlas)
             ImageIO.write(debugImg, "PNG", File(atlasDebugDir, "atlas_${atlas.id}_${atlas.bpp}bpp.png"))
         }
-        println("  Dumped ${result.atlases.size} debug atlas images to ${atlasDebugDir.path}")
+        echo("  Dumped ${result.atlases.size} debug atlas images to ${atlasDebugDir.path}")
 
-        println("\nAll files written to ${outputDir.path}")
-        println("Done!")
+        echo("\nAll files written to ${outputDirFile.path}")
+        echo("Done!")
+    }
+
+    companion object {
+        @JvmStatic
+        fun main(args: Array<String>) = ButterscotchPreprocessor().main(args)
     }
 
     private fun dumpDebugImages(dataWinBytes: ByteArray, outputDir: File) {

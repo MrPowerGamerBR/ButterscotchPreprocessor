@@ -14,4 +14,5 @@ kotlin {
 dependencies {
     implementation(project(":processor-common"))
     implementation(libs.coroutines.core.jvm)
+    implementation(libs.clikt)
 }
