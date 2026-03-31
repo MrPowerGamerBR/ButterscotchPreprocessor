@@ -23,6 +23,9 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
         .path()
         .default(Path.of("output"))
 
+    val debugOutputDir by option("--debug-output", help = "Directory for debug output (sprites, backgrounds, fonts, tiles, atlas debug images)")
+        .path()
+
     override fun run() {
         val dataWinFile = dataWinPath.toFile()
         echo("Parsing $dataWinPath...")
@@ -33,7 +36,11 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
         outputDir.createDirectories()
 
         // Debug dumps (JVM-only, using ImageIO)
-        dumpDebugImages(bytes, outputDirFile)
+        if (debugOutputDir != null) {
+            val debugDir = debugOutputDir!!.toFile()
+            debugDir.mkdirs()
+            dumpDebugImages(bytes, debugDir)
+        }
 
         // Load external audio files from the same directory as data.win
         val externalAudioFiles = loadExternalAudioFiles(dataWinDir)
@@ -52,13 +59,16 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
         File(outputDirFile, "SOUNDS.BIN").writeBytes(result.soundsBin)
 
         // Dump debug atlas images
-        val atlasDebugDir = File(outputDirFile, "atlas_debug")
-        atlasDebugDir.mkdirs()
-        for (atlas in result.atlases) {
-            val debugImg = renderAtlasDebug(atlas)
-            ImageIO.write(debugImg, "PNG", File(atlasDebugDir, "atlas_${atlas.id}_${atlas.bpp}bpp.png"))
+        if (debugOutputDir != null) {
+            val debugDir = debugOutputDir!!.toFile()
+            val atlasDebugDir = File(debugDir, "atlas_debug")
+            atlasDebugDir.mkdirs()
+            for (atlas in result.atlases) {
+                val debugImg = renderAtlasDebug(atlas)
+                ImageIO.write(debugImg, "PNG", File(atlasDebugDir, "atlas_${atlas.id}_${atlas.bpp}bpp.png"))
+            }
+            echo("  Dumped ${result.atlases.size} debug atlas images to ${atlasDebugDir.path}")
         }
-        echo("  Dumped ${result.atlases.size} debug atlas images to ${atlasDebugDir.path}")
 
         echo("\nAll files written to ${outputDirFile.path}")
         echo("Done!")
