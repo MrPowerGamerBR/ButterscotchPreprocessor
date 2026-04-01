@@ -140,7 +140,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
     // Create the worker once, loading the same script in a worker context
     val worker = remember {
-        Worker("/assets/js/processor-web.js").also { w ->
+        Worker("/assets/js/processor-web.js?v=${js("window.jsBundleHash") as String}").also { w ->
             w.asDynamic().onmessage = { event: dynamic ->
                 val msg: dynamic = event.data
                 when (msg.type as String) {

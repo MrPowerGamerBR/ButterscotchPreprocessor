@@ -145,6 +145,11 @@ class ButterscotchPreprocessorWebServer(
                                     }
                                 }
                             }
+                            script {
+                                unsafe {
+                                    raw("""window.jsBundleHash = "$jsBundleHash";""")
+                                }
+                            }
                             script(src = "/assets/js/processor-web.js?v=$jsBundleHash") {}
                         }
                     }
