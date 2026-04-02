@@ -78,7 +78,6 @@ fun App(m: ButterscotchPreprocessorWeb) {
     var loadedAudioGroupFiles by remember { mutableStateOf<Map<Int, ByteArray>>(emptyMap()) }
     var loadedSourceFiles by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
     var parsedGameName by remember { mutableStateOf<String?>(null) }
-    var deferDrawToAfterAllSteps by remember { mutableStateOf(true) }
     val controllerMappings = remember {
         mutableStateMapOf(
             PS2PadKey.PAD_UP to GMLKey.VK_UP,
@@ -203,7 +202,6 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                     Iso9660Creator.IsoFile("SOUNDBNK.BIN", soundBnkBin),
                                     Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
                                     Iso9660Creator.IsoFile("CONFIG.JSN", buildJsonObject {
-                                        put("deferDrawToAfterAllSteps", deferDrawToAfterAllSteps)
                                         put("debugOverlayEnabled", debugOverlayEnabled)
                                         putJsonObject("fileSystem") {
                                             for (mapping in filesystemMappings) {
@@ -914,15 +912,6 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         }
                     }
                 }
-            }
-
-            DiscordToggle(
-                "defer-draw-to-after-all-steps",
-                "Defer Draw to After All Steps",
-                "When enabled, Butterscotch will defer GameMaker draw events after all steps events have caught up. This improves performance when the game is lagging, but can cause glitches if the game depends on draw logic.",
-                deferDrawToAfterAllSteps
-            ) {
-                deferDrawToAfterAllSteps = !deferDrawToAfterAllSteps
             }
 
             DiscordToggle(
