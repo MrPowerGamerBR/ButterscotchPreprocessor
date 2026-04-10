@@ -2,6 +2,7 @@ package com.mrpowergamerbr.butterscotchpreprocessor.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +35,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.compose.web.attributes.InputType
 import org.jetbrains.compose.web.attributes.selected
+import org.jetbrains.compose.web.attributes.value
 import org.jetbrains.compose.web.dom.A
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
@@ -65,6 +67,100 @@ import kotlin.collections.component2
 import kotlin.collections.iterator
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+private val UNDERTALE_CONTROLLER_MAPPINGS = mapOf(
+    PS2PadKey.PAD_UP to GMLKey.VK_UP,
+    PS2PadKey.PAD_DOWN to GMLKey.VK_DOWN,
+    PS2PadKey.PAD_LEFT to GMLKey.VK_LEFT,
+    PS2PadKey.PAD_RIGHT to GMLKey.VK_RIGHT,
+    PS2PadKey.PAD_CROSS to GMLKey.KEY_Z,
+    PS2PadKey.PAD_SQUARE to GMLKey.KEY_X,
+    PS2PadKey.PAD_START to GMLKey.KEY_C,
+    PS2PadKey.PAD_TRIANGLE to GMLKey.VK_ESCAPE,
+    PS2PadKey.PAD_L1 to GMLKey.VK_PAGEDOWN,
+    PS2PadKey.PAD_R1 to GMLKey.VK_PAGEUP,
+    PS2PadKey.PAD_L2 to GMLKey.VK_F10,
+    PS2PadKey.PAD_SELECT to GMLKey.VK_F12,
+)
+
+private val DEFAULT_LIGHT_SETTINGS = LightSettings(
+    lightColor1 = Color(179, 179, 179), lightDir1 = Triple("0.5", "0.5", "0.5"),
+    lightColor2 = Color(128, 128, 128), lightDir2 = Triple("0.0", "-0.4", "-0.1"),
+    lightColor3 = Color(77, 77, 77), lightDir3 = Triple("-0.5", "-0.5", "0.5"),
+)
+
+data class LightSettings(
+    val lightColor1: Color, val lightDir1: Triple<String, String, String>,
+    val lightColor2: Color, val lightDir2: Triple<String, String, String>,
+    val lightColor3: Color, val lightDir3: Triple<String, String, String>,
+)
+
+data class Preset(
+    val displayName: String,
+    val gen8MatchName: String,
+    val controllerMappings: Map<PS2PadKey, GMLKey>,
+    val filesystemMappings: Map<String, String>,
+    val disabledObjects: List<String>,
+    val bgAlpha: Int,
+    val bgColorTopLeft: Color,
+    val bgColorTopRight: Color,
+    val bgColorBottomLeft: Color,
+    val bgColorBottomRight: Color,
+    val ambientColor: Color,
+    val lights: LightSettings,
+    val debugOverlayEnabled: Boolean,
+)
+
+private val UNDERTALE_PRESET = Preset(
+    displayName = "Undertale",
+    gen8MatchName = "UNDERTALE",
+    controllerMappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    filesystemMappings = mapOf(
+        "file0" to "mc0:UNDERTALE/file0",
+        "file9" to "mc0:UNDERTALE/file9",
+        "undertale.ini" to "mc0:UNDERTALE/undertale.ini",
+        "credits.txt" to "\$BOOT:CREDITS.TXT",
+    ),
+    disabledObjects = listOf(
+        "obj_snowfloor",
+        "obj_glowparticle",
+        "obj_true_lavawaver",
+        "obj_true_antiwaver",
+        "obj_orangeparticle",
+    ),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(255, 204, 0),
+    bgColorTopRight = Color(255, 204, 0),
+    bgColorBottomLeft = Color(180, 140, 0),
+    bgColorBottomRight = Color(180, 140, 0),
+    ambientColor = Color(255, 204, 0),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    debugOverlayEnabled = true,
+)
+
+private val SURVEY_PROGRAM_PRESET = Preset(
+    displayName = "DELTARUNE (SURVEY_PROGRAM)",
+    gen8MatchName = "SURVEY_PROGRAM",
+    controllerMappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    filesystemMappings = mapOf(
+        "lang/lang_en.json" to "\$BOOT:LANG/LANG_EN.JSON",
+        "lang/lang_ja.json" to "\$BOOT:LANG/LANG_JA.JSON",
+        "filech1_0" to "mc0:/SURVEY_PROGRAM/filech1_0",
+        "filech1_9" to "mc0:/SURVEY_PROGRAM/filech1_9",
+        "dr.ini" to "mc0:/SURVEY_PROGRAM/dr.ini",
+    ),
+    disabledObjects = emptyList(),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(50, 20, 100),
+    bgColorTopRight = Color(50, 20, 100),
+    bgColorBottomLeft = Color(20, 5, 50),
+    bgColorBottomRight = Color(20, 5, 50),
+    ambientColor = Color(50, 20, 100),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    debugOverlayEnabled = true,
+)
+
+private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET)
 
 @Composable
 fun App(m: ButterscotchPreprocessorWeb) {
@@ -135,6 +231,36 @@ fun App(m: ButterscotchPreprocessorWeb) {
         )
     }
     var debugOverlayEnabled by remember { mutableStateOf(true) }
+    var selectedPreset by remember { mutableStateOf<Preset?>(UNDERTALE_PRESET) }
+
+    val applyPreset = { preset: Preset ->
+        selectedPreset = preset
+        controllerMappings.clear()
+        controllerMappings.putAll(preset.controllerMappings)
+        filesystemMappings.clear()
+        filesystemMappings.putAll(preset.filesystemMappings)
+        disabledObjects.clear()
+        disabledObjects.addAll(preset.disabledObjects)
+        bgAlpha = preset.bgAlpha
+        bgColorTopLeft = preset.bgColorTopLeft
+        bgColorTopRight = preset.bgColorTopRight
+        bgColorBottomLeft = preset.bgColorBottomLeft
+        bgColorBottomRight = preset.bgColorBottomRight
+        ambientColor = preset.ambientColor
+        lightColor1 = preset.lights.lightColor1
+        lightDir1X = preset.lights.lightDir1.first
+        lightDir1Y = preset.lights.lightDir1.second
+        lightDir1Z = preset.lights.lightDir1.third
+        lightColor2 = preset.lights.lightColor2
+        lightDir2X = preset.lights.lightDir2.first
+        lightDir2Y = preset.lights.lightDir2.second
+        lightDir2Z = preset.lights.lightDir2.third
+        lightColor3 = preset.lights.lightColor3
+        lightDir3X = preset.lights.lightDir3.first
+        lightDir3Y = preset.lights.lightDir3.second
+        lightDir3Z = preset.lights.lightDir3.third
+        debugOverlayEnabled = preset.debugOverlayEnabled
+    }
 
     val scope = rememberCoroutineScope()
 
@@ -405,6 +531,10 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
                         val gameName = dw.gen8.displayName ?: dw.gen8.name ?: "Unknown"
                         parsedGameName = gameName
+                        val matchedPreset = PRESETS.find { it.gen8MatchName.equals(gameName, ignoreCase = true) }
+                        if (matchedPreset != null) {
+                            applyPreset(matchedPreset)
+                        }
                         val audioMsg = if (audioFiles.isNotEmpty()) " (${audioFiles.size} audio files)" else ""
                         val audioGroupMsg = if (audioGroupDatFiles.isNotEmpty()) " (${audioGroupDatFiles.size} audiogroup files)" else ""
                         status = "Game: $gameName$audioMsg$audioGroupMsg"
@@ -426,7 +556,24 @@ fun App(m: ButterscotchPreprocessorWeb) {
     // Convert button
     if (parsedGameName != null && !processing && downloadUrl == null) {
         P {
-            Text("The default settings are tailored for Undertale, you don't need to change them unless if you want to customize the output for a specific game or mod!")
+            Text("Select a preset to quickly configure the settings for a specific game, or customize the options below.")
+        }
+
+        Div({ classes("preset-buttons"); style { property("display", "flex"); property("gap", "8px") } }) {
+            for (preset in PRESETS) {
+                DiscordButton(
+                    DiscordButtonType.PRIMARY,
+                    attrs = {
+                        onClick { applyPreset(preset) }
+                    }
+                ) {
+                    if (selectedPreset == preset) {
+                        Text("${preset.displayName} (Selected)")
+                    } else {
+                        Text(preset.displayName)
+                    }
+                }
+            }
         }
 
         FieldWrappers {
@@ -473,103 +620,105 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 Td {
                                     val currentMapping = controllerMappings[ps2Key]
 
-                                    Select(attrs = {
-                                        onChange { event ->
-                                            val selectedValue = event.value
-                                            if (selectedValue == "") {
-                                                controllerMappings.remove(ps2Key)
-                                            } else {
-                                                val gmlKey = GMLKey.fromValue(selectedValue!!.toInt())
-                                                if (gmlKey != null) {
-                                                    controllerMappings[ps2Key] = gmlKey
+                                    key(currentMapping) {
+                                        Select(attrs = {
+                                            onChange { event ->
+                                                val selectedValue = event.value
+                                                if (selectedValue == "") {
+                                                    controllerMappings.remove(ps2Key)
+                                                } else {
+                                                    val gmlKey = GMLKey.fromValue(selectedValue!!.toInt())
+                                                    if (gmlKey != null) {
+                                                        controllerMappings[ps2Key] = gmlKey
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }) {
-                                        Option("", attrs = {
-                                            if (currentMapping == null) selected()
                                         }) {
-                                            Text("<not mapped>")
-                                        }
-
-                                        for (gmlKey in GMLKey.entries) {
-                                            if (gmlKey == GMLKey.VK_NOKEY)
-                                                continue
-
-                                            Option(gmlKey.value.toString(), attrs = {
-                                                if (currentMapping == gmlKey) selected()
+                                            Option("", attrs = {
+                                                if (currentMapping == null) selected()
                                             }) {
-                                                Text(
-                                                    when (gmlKey) {
-                                                        GMLKey.VK_NOKEY -> "No Key"
-                                                        GMLKey.VK_BACKSPACE -> "Backspace"
-                                                        GMLKey.VK_TAB -> "Tab"
-                                                        GMLKey.VK_ENTER -> "Enter"
-                                                        GMLKey.VK_SHIFT -> "Shift"
-                                                        GMLKey.VK_CONTROL -> "Control"
-                                                        GMLKey.VK_ALT -> "Alt"
-                                                        GMLKey.VK_ESCAPE -> "Escape"
-                                                        GMLKey.VK_SPACE -> "Space"
-                                                        GMLKey.VK_PAGEUP -> "Page Up"
-                                                        GMLKey.VK_PAGEDOWN -> "Page Down"
-                                                        GMLKey.VK_END -> "End"
-                                                        GMLKey.VK_HOME -> "Home"
-                                                        GMLKey.VK_LEFT -> "Left Arrow"
-                                                        GMLKey.VK_UP -> "Up Arrow"
-                                                        GMLKey.VK_RIGHT -> "Right Arrow"
-                                                        GMLKey.VK_DOWN -> "Down Arrow"
-                                                        GMLKey.VK_INSERT -> "Insert"
-                                                        GMLKey.VK_DELETE -> "Delete"
-                                                        GMLKey.KEY_0 -> "0"
-                                                        GMLKey.KEY_1 -> "1"
-                                                        GMLKey.KEY_2 -> "2"
-                                                        GMLKey.KEY_3 -> "3"
-                                                        GMLKey.KEY_4 -> "4"
-                                                        GMLKey.KEY_5 -> "5"
-                                                        GMLKey.KEY_6 -> "6"
-                                                        GMLKey.KEY_7 -> "7"
-                                                        GMLKey.KEY_8 -> "8"
-                                                        GMLKey.KEY_9 -> "9"
-                                                        GMLKey.KEY_A -> "A"
-                                                        GMLKey.KEY_B -> "B"
-                                                        GMLKey.KEY_C -> "C"
-                                                        GMLKey.KEY_D -> "D"
-                                                        GMLKey.KEY_E -> "E"
-                                                        GMLKey.KEY_F -> "F"
-                                                        GMLKey.KEY_G -> "G"
-                                                        GMLKey.KEY_H -> "H"
-                                                        GMLKey.KEY_I -> "I"
-                                                        GMLKey.KEY_J -> "J"
-                                                        GMLKey.KEY_K -> "K"
-                                                        GMLKey.KEY_L -> "L"
-                                                        GMLKey.KEY_M -> "M"
-                                                        GMLKey.KEY_N -> "N"
-                                                        GMLKey.KEY_O -> "O"
-                                                        GMLKey.KEY_P -> "P"
-                                                        GMLKey.KEY_Q -> "Q"
-                                                        GMLKey.KEY_R -> "R"
-                                                        GMLKey.KEY_S -> "S"
-                                                        GMLKey.KEY_T -> "T"
-                                                        GMLKey.KEY_U -> "U"
-                                                        GMLKey.KEY_V -> "V"
-                                                        GMLKey.KEY_W -> "W"
-                                                        GMLKey.KEY_X -> "X"
-                                                        GMLKey.KEY_Y -> "Y"
-                                                        GMLKey.KEY_Z -> "Z"
-                                                        GMLKey.VK_F1 -> "F1"
-                                                        GMLKey.VK_F2 -> "F2"
-                                                        GMLKey.VK_F3 -> "F3"
-                                                        GMLKey.VK_F4 -> "F4"
-                                                        GMLKey.VK_F5 -> "F5"
-                                                        GMLKey.VK_F6 -> "F6"
-                                                        GMLKey.VK_F7 -> "F7"
-                                                        GMLKey.VK_F8 -> "F8"
-                                                        GMLKey.VK_F9 -> "F9"
-                                                        GMLKey.VK_F10 -> "F10"
-                                                        GMLKey.VK_F11 -> "F11"
-                                                        GMLKey.VK_F12 -> "F12"
-                                                    }
-                                                )
+                                                Text("<not mapped>")
+                                            }
+
+                                            for (gmlKey in GMLKey.entries) {
+                                                if (gmlKey == GMLKey.VK_NOKEY)
+                                                    continue
+
+                                                Option(gmlKey.value.toString(), attrs = {
+                                                    if (currentMapping == gmlKey) selected()
+                                                }) {
+                                                    Text(
+                                                        when (gmlKey) {
+                                                            GMLKey.VK_NOKEY -> "No Key"
+                                                            GMLKey.VK_BACKSPACE -> "Backspace"
+                                                            GMLKey.VK_TAB -> "Tab"
+                                                            GMLKey.VK_ENTER -> "Enter"
+                                                            GMLKey.VK_SHIFT -> "Shift"
+                                                            GMLKey.VK_CONTROL -> "Control"
+                                                            GMLKey.VK_ALT -> "Alt"
+                                                            GMLKey.VK_ESCAPE -> "Escape"
+                                                            GMLKey.VK_SPACE -> "Space"
+                                                            GMLKey.VK_PAGEUP -> "Page Up"
+                                                            GMLKey.VK_PAGEDOWN -> "Page Down"
+                                                            GMLKey.VK_END -> "End"
+                                                            GMLKey.VK_HOME -> "Home"
+                                                            GMLKey.VK_LEFT -> "Left Arrow"
+                                                            GMLKey.VK_UP -> "Up Arrow"
+                                                            GMLKey.VK_RIGHT -> "Right Arrow"
+                                                            GMLKey.VK_DOWN -> "Down Arrow"
+                                                            GMLKey.VK_INSERT -> "Insert"
+                                                            GMLKey.VK_DELETE -> "Delete"
+                                                            GMLKey.KEY_0 -> "0"
+                                                            GMLKey.KEY_1 -> "1"
+                                                            GMLKey.KEY_2 -> "2"
+                                                            GMLKey.KEY_3 -> "3"
+                                                            GMLKey.KEY_4 -> "4"
+                                                            GMLKey.KEY_5 -> "5"
+                                                            GMLKey.KEY_6 -> "6"
+                                                            GMLKey.KEY_7 -> "7"
+                                                            GMLKey.KEY_8 -> "8"
+                                                            GMLKey.KEY_9 -> "9"
+                                                            GMLKey.KEY_A -> "A"
+                                                            GMLKey.KEY_B -> "B"
+                                                            GMLKey.KEY_C -> "C"
+                                                            GMLKey.KEY_D -> "D"
+                                                            GMLKey.KEY_E -> "E"
+                                                            GMLKey.KEY_F -> "F"
+                                                            GMLKey.KEY_G -> "G"
+                                                            GMLKey.KEY_H -> "H"
+                                                            GMLKey.KEY_I -> "I"
+                                                            GMLKey.KEY_J -> "J"
+                                                            GMLKey.KEY_K -> "K"
+                                                            GMLKey.KEY_L -> "L"
+                                                            GMLKey.KEY_M -> "M"
+                                                            GMLKey.KEY_N -> "N"
+                                                            GMLKey.KEY_O -> "O"
+                                                            GMLKey.KEY_P -> "P"
+                                                            GMLKey.KEY_Q -> "Q"
+                                                            GMLKey.KEY_R -> "R"
+                                                            GMLKey.KEY_S -> "S"
+                                                            GMLKey.KEY_T -> "T"
+                                                            GMLKey.KEY_U -> "U"
+                                                            GMLKey.KEY_V -> "V"
+                                                            GMLKey.KEY_W -> "W"
+                                                            GMLKey.KEY_X -> "X"
+                                                            GMLKey.KEY_Y -> "Y"
+                                                            GMLKey.KEY_Z -> "Z"
+                                                            GMLKey.VK_F1 -> "F1"
+                                                            GMLKey.VK_F2 -> "F2"
+                                                            GMLKey.VK_F3 -> "F3"
+                                                            GMLKey.VK_F4 -> "F4"
+                                                            GMLKey.VK_F5 -> "F5"
+                                                            GMLKey.VK_F6 -> "F6"
+                                                            GMLKey.VK_F7 -> "F7"
+                                                            GMLKey.VK_F8 -> "F8"
+                                                            GMLKey.VK_F9 -> "F9"
+                                                            GMLKey.VK_F10 -> "F10"
+                                                            GMLKey.VK_F11 -> "F11"
+                                                            GMLKey.VK_F12 -> "F12"
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
                                     }
