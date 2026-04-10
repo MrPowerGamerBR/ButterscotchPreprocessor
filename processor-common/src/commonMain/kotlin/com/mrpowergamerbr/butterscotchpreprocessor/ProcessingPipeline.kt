@@ -29,6 +29,7 @@ suspend fun processDataWin(
     dataWinBytes: ByteArray,
     externalAudioFiles: Map<String, ByteArray> = emptyMap(),
     audioGroupFiles: Map<Int, ByteArray> = emptyMap(),
+    musFiles: Map<String, ByteArray> = emptyMap(),
     progressCallback: ((String) -> Unit)? = null
 ): ProcessingResult {
     val log = progressCallback ?: {}
@@ -163,7 +164,7 @@ suspend fun processDataWin(
         }
         val imgName = "tile/${defName}_${key.srcX}_${key.srcY}_${key.w}x${key.h}"
         allImages.add(imgName to tileImg)
-        atlasGroupKeys[imgName] = imgName
+        atlasGroupKeys[imgName] = "tile/$defName"
     }
 
     // Crop transparent borders before packing (sprites only)
@@ -399,7 +400,24 @@ suspend fun processDataWin(
     val failedCount = parsedAudio.size - totalDecoded
     log("  $embeddedCount embedded + $audioGroupCount from audiogroups + $externalCount external = $totalDecoded decoded sounds, $failedCount failed or empty")
 
-    // Build SOUNDS.BIN (PCM data and raw OGG files concatenated)
+    // Process streamed music files (mus/ directory)
+    data class MusEntry(val path: String, val audio: AudioData)
+    val musEntries = mutableListOf<MusEntry>()
+    if (musFiles.isNotEmpty()) {
+        log("Decoding ${musFiles.size} streamed music files...")
+        for ((path, fileData) in musFiles.entries.sortedBy { it.key }) {
+            val decoded = parseOgg(fileData)
+            if (decoded != null) {
+                musEntries.add(MusEntry(path, decoded))
+                log("  $path: ${decoded.sampleRate}Hz ${decoded.channels}ch -> ADPCM (${decoded.data.size} bytes)")
+            } else {
+                log("  $path: FAILED to decode")
+            }
+        }
+        log("  ${musEntries.size}/${musFiles.size} music files decoded")
+    }
+
+    // Build SOUNDS.BIN (PCM/ADPCM data concatenated: SFX first, then music)
     val soundsWriter = ByteWriter()
     val audioOffsets = IntArray(parsedAudio.size)
     val audioSizes = IntArray(parsedAudio.size)
@@ -410,17 +428,28 @@ suspend fun processDataWin(
             soundsWriter.writeByteArray(audio.data)
         }
     }
+
+    // Append music data to SOUNDS.BIN
+    val musOffsets = IntArray(musEntries.size)
+    val musSizes = IntArray(musEntries.size)
+    for ((i, entry) in musEntries.withIndex()) {
+        musOffsets[i] = soundsWriter.size
+        musSizes[i] = entry.audio.data.size
+        soundsWriter.writeByteArray(entry.audio.data)
+    }
+
     val soundsBin = soundsWriter.getAsByteArray()
     val pcmCount = parsedAudio.count { it != null && it.format == AUDIO_FORMAT_PCM }
     val adpcmCount = parsedAudio.count { it != null && it.format == AUDIO_FORMAT_ADPCM }
-    log("  SOUNDS.BIN: ${soundsBin.size} bytes ($pcmCount PCM, $adpcmCount ADPCM)")
+    log("  SOUNDS.BIN: ${soundsBin.size} bytes ($pcmCount PCM, $adpcmCount ADPCM, ${musEntries.size} music tracks)")
 
     // Build SOUNDBNK.BIN
     val soundBnkWriter = ByteWriter()
-    // Header (5 bytes)
+    // Header (7 bytes)
     soundBnkWriter.writeByte(0)                                    // version
     soundBnkWriter.writeShortLE(dw.sond.sounds.size)               // sondEntryCount
     soundBnkWriter.writeShortLE(parsedAudio.size)                  // audoEntryCount
+    soundBnkWriter.writeShortLE(musEntries.size)                   // musEntryCount
 
     // SOND entries (12 bytes each)
     for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
@@ -457,6 +486,23 @@ suspend fun processDataWin(
             soundBnkWriter.writeShortLE(0)                         // reserved
         }
     }
+
+    // MUS string table (variable size: u8 nameLength + name bytes per entry)
+    for (entry in musEntries) {
+        val nameBytes = entry.path.encodeToByteArray()
+        soundBnkWriter.writeByte(nameBytes.size)                   // nameLength
+        soundBnkWriter.writeByteArray(nameBytes)                   // name (UTF-8, no null terminator)
+    }
+
+    // MUS entries (12 bytes each)
+    for ((i, entry) in musEntries.withIndex()) {
+        soundBnkWriter.writeIntLE(musOffsets[i])                   // dataOffset in SOUNDS.BIN
+        soundBnkWriter.writeIntLE(musSizes[i])                     // dataSize
+        soundBnkWriter.writeShortLE(entry.audio.sampleRate)        // sampleRate
+        soundBnkWriter.writeByte(entry.audio.channels)             // channels
+        soundBnkWriter.writeByte(entry.audio.format)               // format (0=PCM, 1=ADPCM)
+    }
+
     val soundBnkBin = soundBnkWriter.getAsByteArray()
 
     log("Done!")

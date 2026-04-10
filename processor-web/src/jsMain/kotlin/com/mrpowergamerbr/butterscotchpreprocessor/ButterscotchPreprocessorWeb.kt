@@ -56,9 +56,20 @@ class ButterscotchPreprocessorWeb {
                         }
                     }
 
+                    // Receive streamed music files
+                    val musFilesObj: dynamic = msg.musFiles
+                    val musFiles = HashMap<String, ByteArray>()
+                    if (musFilesObj != null && musFilesObj != undefined) {
+                        val musKeys = Object.keys(musFilesObj)
+                        for (key in musKeys) {
+                            val musData = musFilesObj[key]
+                            musFiles[key] = Int8Array(musData as ArrayBufferLike).unsafeCast<ByteArray>()
+                        }
+                    }
+
                     scope.launch {
                         try {
-                            val result = processDataWin(bytes, externalAudioFiles, audioGroupFiles) { progressMsg ->
+                            val result = processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles) { progressMsg ->
                                 self.postMessage(
                                     unsafeJso {
                                         this.type = "progress"

@@ -48,9 +48,12 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
         // Load audiogroup files (audiogroup%d.dat) from the same directory as data.win
         val audioGroupFiles = loadAudioGroupFiles(dataWinDir)
 
+        // Load streamed music files (mus/ subdirectory or other subdirectories with OGG files)
+        val musFiles = loadMusFiles(dataWinDir)
+
         // Core processing via common pipeline
         val result = runBlocking {
-            processDataWin(bytes, externalAudioFiles, audioGroupFiles) { echo(it) }
+            processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles) { echo(it) }
         }
 
         // Write output files
@@ -273,6 +276,23 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
         }
         if (result.isNotEmpty()) {
             println("Found ${result.size} external audio files in ${dir.path}")
+        }
+        return result
+    }
+
+    // Scan for subdirectories containing OGG files (e.g. mus/) and load them keyed by relative path
+    private fun loadMusFiles(dir: File): Map<String, ByteArray> {
+        val result = HashMap<String, ByteArray>()
+        val subdirs = dir.listFiles { f -> f.isDirectory } ?: return result
+        for (subdir in subdirs) {
+            val oggFiles = subdir.walkTopDown().filter { it.isFile && it.name.lowercase().endsWith(".ogg") }
+            for (file in oggFiles) {
+                val relativePath = file.relativeTo(dir).path
+                result[relativePath] = file.readBytes()
+            }
+        }
+        if (result.isNotEmpty()) {
+            println("Found ${result.size} streamed music files in subdirectories of ${dir.path}")
         }
         return result
     }
