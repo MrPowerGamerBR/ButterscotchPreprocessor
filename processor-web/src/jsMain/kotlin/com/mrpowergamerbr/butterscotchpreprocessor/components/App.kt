@@ -2,10 +2,10 @@ package com.mrpowergamerbr.butterscotchpreprocessor.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -32,15 +32,12 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.compose.web.attributes.InputType
-import org.jetbrains.compose.web.attributes.selected
 import org.jetbrains.compose.web.dom.A
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
 import org.jetbrains.compose.web.dom.H2
 import org.jetbrains.compose.web.dom.Input
-import org.jetbrains.compose.web.dom.Option
 import org.jetbrains.compose.web.dom.P
-import org.jetbrains.compose.web.dom.Select
 import org.jetbrains.compose.web.dom.Table
 import org.jetbrains.compose.web.dom.Tbody
 import org.jetbrains.compose.web.dom.Td
@@ -98,7 +95,7 @@ data class Preset(
     val controller1Mappings: Map<PS2PadKey, GMLKey>,
     val controller2Mappings: Map<PS2PadKey, GMLKey>,
     val filesystemMappings: Map<String, String>,
-    val disabledObjects: List<String>,
+    val disabledObjects: Set<String>,
     val bgAlpha: Int,
     val bgColorTopLeft: Color,
     val bgColorTopRight: Color,
@@ -106,6 +103,8 @@ data class Preset(
     val bgColorBottomRight: Color,
     val ambientColor: Color,
     val lights: LightSettings,
+    val lazyLoadRooms: Boolean,
+    val eagerlyLoadedRooms: Set<String>,
     val debugOverlayEnabled: Boolean,
 )
 
@@ -131,7 +130,7 @@ private val UNDERTALE_PRESET = Preset(
         "undertale.ini" to "mc0:UNDERTALE/undertale.ini",
         "credits.txt" to "\$BOOT:CREDITS.TXT",
     ),
-    disabledObjects = listOf(
+    disabledObjects = setOf(
         "obj_snowfloor",
         "obj_glowparticle",
         "obj_true_lavawaver",
@@ -145,6 +144,8 @@ private val UNDERTALE_PRESET = Preset(
     bgColorBottomRight = Color(180, 140, 0),
     ambientColor = Color(255, 204, 0),
     lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = false,
+    eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
 )
 
@@ -166,7 +167,7 @@ private val SURVEY_PROGRAM_PRESET = Preset(
         "dr.ini" to "mc0:/SURVEY_PROGRAM/dr.ini",
         "true_config.ini" to "mc0:/SURVEY_PROGRAM/true_config.ini"
     ),
-    disabledObjects = emptyList(),
+    disabledObjects = emptySet(),
     bgAlpha = 68,
     bgColorTopLeft = Color(50, 20, 100),
     bgColorTopRight = Color(50, 20, 100),
@@ -174,6 +175,8 @@ private val SURVEY_PROGRAM_PRESET = Preset(
     bgColorBottomRight = Color(20, 5, 50),
     ambientColor = Color(50, 20, 100),
     lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = false,
+    eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
 )
 
@@ -240,15 +243,13 @@ fun App(m: ButterscotchPreprocessorWeb) {
     var lightDir3Z by remember { mutableStateOf("0.5") }
     var ambientColor by remember { mutableStateOf(Color(255, 204, 0)) }
     val disabledObjects = remember {
-        mutableStateListOf(
-            "obj_snowfloor",
-            "obj_glowparticle",
-            "obj_true_lavawaver",
-            "obj_true_antiwaver",
-            "obj_orangeparticle"
-        )
+        mutableStateSetOf<String>()
     }
     var debugOverlayEnabled by remember { mutableStateOf(true) }
+    var lazyLoadRooms by remember { mutableStateOf(false) }
+    val eagerlyLoadedRooms = remember {
+        mutableStateSetOf<String>()
+    }
     var selectedPreset by remember { mutableStateOf<Preset?>(UNDERTALE_PRESET) }
 
     val applyPreset = { preset: Preset ->
@@ -280,6 +281,9 @@ fun App(m: ButterscotchPreprocessorWeb) {
         lightDir3Y = preset.lights.lightDir3.second
         lightDir3Z = preset.lights.lightDir3.third
         debugOverlayEnabled = preset.debugOverlayEnabled
+        lazyLoadRooms = preset.lazyLoadRooms
+        eagerlyLoadedRooms.clear()
+        eagerlyLoadedRooms.addAll(preset.eagerlyLoadedRooms)
     }
 
     val scope = rememberCoroutineScope()
@@ -389,6 +393,12 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                         putJsonArray("disabledObjects") {
                                             for (disabledObject in disabledObjects) {
                                                 add(disabledObject)
+                                            }
+                                        }
+                                        put("lazyLoadRooms", lazyLoadRooms)
+                                        putJsonArray("eagerlyLoadedRooms") {
+                                            for (eagerlyLoadedRoom in eagerlyLoadedRooms) {
+                                                add(eagerlyLoadedRoom)
                                             }
                                         }
                                     }.toString().encodeToByteArray()),
@@ -681,70 +691,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 }
             }
 
-            FieldWrapper {
-                FieldInformation {
-                    FieldLabel("Disabled Objects")
-                }
-
-                Table(attrs = {
-                    classes("fancy-table")
-                }) {
-                    Thead {
-                        Tr {
-                            Th { Text("Object Name") }
-                            Th {}
-                        }
-                    }
-                    Tbody {
-                        for (disabledObject in disabledObjects) {
-                            Tr {
-                                Td { Text(disabledObject) }
-                                Td(attrs = {
-                                    classes("action-cell")
-                                }) {
-                                    DiscordButton(
-                                        DiscordButtonType.NO_BACKGROUND_THEME_DEPENDENT_DARK_TEXT,
-                                        attrs = {
-                                            onClick {
-                                                disabledObjects.remove(disabledObject)
-                                            }
-                                        }
-                                    ) {
-                                        Text("Delete")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                var objectName by remember { mutableStateOf<String>("") }
-
-                Div(attrs = {
-                    classes("add-mapping-form")
-                }) {
-                    TextInput(objectName) {
-                        attr("placeholder", "Object Name")
-                        onInput {
-                            objectName = it.value
-                        }
-                    }
-
-                    DiscordButton(
-                        DiscordButtonType.PRIMARY,
-                        {
-                            onClick {
-                                if (objectName.isNotBlank()) {
-                                    disabledObjects.add(objectName)
-                                    objectName = ""
-                                }
-                            }
-                        }
-                    ) {
-                        Text("Add")
-                    }
-                }
-            }
+            StringSetTable("Disabled Objects", "Object Name", disabledObjects)
 
             val checkmarkIcon = SVGIconManager.fromRawHtml(ButterscotchPreprocessorWeb.CHECKMARK_SVG)
             val eyeDropperIcon = SVGIconManager.fromRawHtml(ButterscotchPreprocessorWeb.EYE_DROPPER_SVG)
@@ -954,6 +901,17 @@ fun App(m: ButterscotchPreprocessorWeb) {
                     }
                 }
             }
+
+            DiscordToggle(
+                "lazy-load-rooms",
+                "Lazy Load Rooms",
+                "When enabled, Butterscotch will load room objects/tiles/layers/etc when the game switches to the room, instead of keeping them always loaded in memory. Reduces memory usage, but slows down room switching.",
+                lazyLoadRooms
+            ) {
+                lazyLoadRooms = !lazyLoadRooms
+            }
+
+            StringSetTable("Eagerly Loaded Rooms", "Room Name", eagerlyLoadedRooms)
 
             DiscordToggle(
                 "debug-overlay-enabled",
