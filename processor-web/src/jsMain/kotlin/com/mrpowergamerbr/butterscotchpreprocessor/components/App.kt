@@ -213,7 +213,7 @@ private val DELTARUNE_CHAPTER_1_AND_2_PRESET = Preset(
     bgColorBottomRight = Color(20, 5, 50),
     ambientColor = Color(50, 20, 100),
     lights = DEFAULT_LIGHT_SETTINGS,
-    lazyLoadRooms = false,
+    lazyLoadRooms = true,
     eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
 )
