@@ -180,7 +180,45 @@ private val SURVEY_PROGRAM_PRESET = Preset(
     debugOverlayEnabled = true,
 )
 
-private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET)
+private val DELTARUNE_CHAPTER_1_AND_2_PRESET = Preset(
+    displayName = "DELTARUNE Chapter 1&2",
+    gen8MatchName = "DELTARUNE Chapter 1&2",
+    controller1Mappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    controller2Mappings = emptyMap(),
+    filesystemMappings = mapOf(
+        "lang/lang_en.json" to "\$BOOT:LANG/LANG_EN.JSON",
+        "lang/lang_ja.json" to "\$BOOT:LANG/LANG_JA.JSON",
+        "filech1_0" to "mc0:/DELTARUNE/filech1_0",
+        "filech1_1" to "mc0:/DELTARUNE/filech1_1",
+        "filech1_2" to "mc0:/DELTARUNE/filech1_2",
+        "filech1_3" to "mc0:/DELTARUNE/filech1_3",
+        "filech1_4" to "mc0:/DELTARUNE/filech1_4",
+        "filech1_5" to "mc0:/DELTARUNE/filech1_5",
+        "filech1_9" to "mc0:/DELTARUNE/filech1_9",
+        "filech2_0" to "mc0:/DELTARUNE/filech2_0",
+        "filech2_1" to "mc0:/DELTARUNE/filech2_1",
+        "filech2_2" to "mc0:/DELTARUNE/filech2_2",
+        "filech2_3" to "mc0:/DELTARUNE/filech2_3",
+        "filech2_4" to "mc0:/DELTARUNE/filech2_4",
+        "filech2_5" to "mc0:/DELTARUNE/filech2_5",
+        "filech2_9" to "mc0:/DELTARUNE/filech2_9",
+        "dr.ini" to "mc0:/DELTARUNE/dr.ini",
+        "true_config.ini" to "mc0:/DELTARUNE/true_config.ini"
+    ),
+    disabledObjects = emptySet(),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(50, 20, 100),
+    bgColorTopRight = Color(50, 20, 100),
+    bgColorBottomLeft = Color(20, 5, 50),
+    bgColorBottomRight = Color(20, 5, 50),
+    ambientColor = Color(50, 20, 100),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = false,
+    eagerlyLoadedRooms = emptySet(),
+    debugOverlayEnabled = true,
+)
+
+private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET, DELTARUNE_CHAPTER_1_AND_2_PRESET)
 
 @Composable
 fun App(m: ButterscotchPreprocessorWeb) {
@@ -320,7 +358,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
                                 // Use custom ELF if provided, otherwise fetch default from resources
                                 val validBytecodeVersion = if (parsedDataWin.gen8.bytecodeVersion == 17) 17 else 16
-                                
+
                                 val elfBytes = customElfBytes ?: fetchResourceBytes("/web/butterscotch-bc$validBytecodeVersion.elf?v=${Date.now()}")
 
                                 // Use custom icon if provided, otherwise fetch default from resources
