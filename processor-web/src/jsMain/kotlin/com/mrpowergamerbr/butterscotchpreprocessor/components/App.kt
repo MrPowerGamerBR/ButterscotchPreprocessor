@@ -616,9 +616,18 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         if (matchedPreset != null) {
                             applyPreset(matchedPreset)
                         }
-                        val audioMsg = if (audioFiles.isNotEmpty()) " [Bytecode Version ${dw.gen8.bytecodeVersion}] (${audioFiles.size} audio files)" else ""
-                        val audioGroupMsg = if (audioGroupDatFiles.isNotEmpty()) " (${audioGroupDatFiles.size} audiogroup files)" else ""
-                        status = "Game: $gameName$audioMsg$audioGroupMsg"
+
+                        status = buildString {
+                            append("Game: ")
+                            append(gameName)
+                            append(" [Bytecode Version ${dw.gen8.bytecodeVersion}]")
+                            if (audioFiles.isNotEmpty()) {
+                                append(" (${audioFiles.size} audio files)")
+                            }
+                            if (audioGroupDatFiles.isNotEmpty()) {
+                                append(" (${audioGroupDatFiles.size} audiogroup files)")
+                            }
+                        }
 
                         parsedDataWin = dw
                     } catch (e: Exception) {
