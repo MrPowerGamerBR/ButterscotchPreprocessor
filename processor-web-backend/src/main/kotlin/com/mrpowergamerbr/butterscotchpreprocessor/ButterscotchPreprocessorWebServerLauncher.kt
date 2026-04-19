@@ -11,13 +11,16 @@ object ButterscotchPreprocessorWebServerLauncher {
             .readBytes()
             .toString(Charsets.UTF_8)
 
-        val butterscotchElf = ButterscotchPreprocessorWebServer::class.java.getResourceAsStream("/web/butterscotch.elf")!!
+        val butterscotchBC16Elf = ButterscotchPreprocessorWebServer::class.java.getResourceAsStream("/web/butterscotch-bc16.elf")!!
+            .readBytes()
+
+        val butterscotchBC17Elf = ButterscotchPreprocessorWebServer::class.java.getResourceAsStream("/web/butterscotch-bc17.elf")!!
             .readBytes()
 
         val iconIco = ButterscotchPreprocessorWebServer::class.java.getResourceAsStream("/web/ICON.ICO")!!
             .readBytes()
 
-        val server = ButterscotchPreprocessorWebServer(jsBundle, cssBundle, butterscotchElf, iconIco)
+        val server = ButterscotchPreprocessorWebServer(jsBundle, cssBundle, butterscotchBC16Elf, butterscotchBC17Elf, iconIco)
         server.start()
     }
 }
