@@ -185,6 +185,7 @@ private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET)
 @Composable
 fun App(m: ButterscotchPreprocessorWeb) {
     var status by remember { mutableStateOf("Select the game's folder to begin!") }
+    var parsedDataWin by remember { mutableStateOf<DataWin?>(null) }
     var logMessages = remember { mutableStateListOf<String>() }
     var downloadUrl by remember { mutableStateOf<String?>(null) }
     var isoFileName by remember { mutableStateOf("output.iso") }
@@ -300,6 +301,8 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         logMessages.add(progressMsg)
                     }
                     "result" -> {
+                        val parsedDataWin = parsedDataWin!!
+
                         scope.launch {
                             try {
                                 status = "Creating ISO..."
@@ -314,8 +317,11 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
                                 val dataWinBytes = loadedFileBytes!!
 
+
                                 // Use custom ELF if provided, otherwise fetch default from resources
-                                val elfBytes = customElfBytes ?: fetchResourceBytes("/web/butterscotch.elf?v=${Date.now()}")
+                                val validBytecodeVersion = if (parsedDataWin.gen8.bytecodeVersion == 17) 17 else 16
+                                
+                                val elfBytes = customElfBytes ?: fetchResourceBytes("/web/butterscotch-bc$validBytecodeVersion.elf?v=${Date.now()}")
 
                                 // Use custom icon if provided, otherwise fetch default from resources
                                 val iconBytes = customIconBytes ?: fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
@@ -435,6 +441,8 @@ fun App(m: ButterscotchPreprocessorWeb) {
         Input(type = InputType.File) {
             attr("webkitdirectory", "")
             onChange { event ->
+                parsedDataWin = null
+
                 val input: dynamic = event.target
                 val files: dynamic = input.files
                 if (files == null || files.length == 0) return@onChange
@@ -573,6 +581,8 @@ fun App(m: ButterscotchPreprocessorWeb) {
                         val audioMsg = if (audioFiles.isNotEmpty()) " [Bytecode Version ${dw.gen8.bytecodeVersion}] (${audioFiles.size} audio files)" else ""
                         val audioGroupMsg = if (audioGroupDatFiles.isNotEmpty()) " (${audioGroupDatFiles.size} audiogroup files)" else ""
                         status = "Game: $gameName$audioMsg$audioGroupMsg"
+
+                        parsedDataWin = dw
                     } catch (e: Exception) {
                         status = "Error reading folder: ${e.message}"
                         loadedFileBytes = null
