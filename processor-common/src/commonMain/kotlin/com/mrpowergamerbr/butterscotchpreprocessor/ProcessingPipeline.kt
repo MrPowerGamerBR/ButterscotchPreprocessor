@@ -19,7 +19,8 @@ private class AudioData(
     val sampleRate: Int,
     val channels: Int,
     val bitsPerSample: Int,  // Only meaningful for PCM (8 or 16)
-    val data: ByteArray      // Raw PCM, raw OGG, or ADPCM encoded data
+    val data: ByteArray,     // Raw PCM, raw OGG, or ADPCM encoded data
+    val sampleCount: Int     // Decoded sample count per channel; length in seconds = sampleCount / sampleRate
 )
 
 private data class TileKey(val useSpriteDefinition: Boolean, val bgDef: Int, val srcX: Int, val srcY: Int, val w: Int, val h: Int)
@@ -463,7 +464,7 @@ suspend fun processDataWin(
         soundBnkWriter.writeShortLE(0)                             // reserved
     }
 
-    // AUDO entries (16 bytes each)
+    // AUDO entries (20 bytes each)
     for ((i, audio) in parsedAudio.withIndex()) {
         if (audio != null) {
             soundBnkWriter.writeIntLE(audioOffsets[i])             // dataOffset
@@ -474,6 +475,7 @@ suspend fun processDataWin(
             soundBnkWriter.writeByte(audio.format)                 // format (0=PCM, 1=ADPCM)
             soundBnkWriter.writeByte(0)                            // reserved
             soundBnkWriter.writeShortLE(0)                         // reserved
+            soundBnkWriter.writeIntLE(audio.sampleCount)           // sampleCount (per channel)
         } else {
             // Unmapped entry
             soundBnkWriter.writeIntLE(0)                           // dataOffset
@@ -484,6 +486,7 @@ suspend fun processDataWin(
             soundBnkWriter.writeByte(0)                            // format
             soundBnkWriter.writeByte(0)                            // reserved
             soundBnkWriter.writeShortLE(0)                         // reserved
+            soundBnkWriter.writeIntLE(0)                           // sampleCount
         }
     }
 
@@ -494,13 +497,14 @@ suspend fun processDataWin(
         soundBnkWriter.writeByteArray(nameBytes)                   // name (UTF-8, no null terminator)
     }
 
-    // MUS entries (12 bytes each)
+    // MUS entries (16 bytes each)
     for ((i, entry) in musEntries.withIndex()) {
         soundBnkWriter.writeIntLE(musOffsets[i])                   // dataOffset in SOUNDS.BIN
         soundBnkWriter.writeIntLE(musSizes[i])                     // dataSize
         soundBnkWriter.writeShortLE(entry.audio.sampleRate)        // sampleRate
         soundBnkWriter.writeByte(entry.audio.channels)             // channels
         soundBnkWriter.writeByte(entry.audio.format)               // format (0=PCM, 1=ADPCM)
+        soundBnkWriter.writeIntLE(entry.audio.sampleCount)         // sampleCount (per channel)
     }
 
     val soundBnkBin = soundBnkWriter.getAsByteArray()
@@ -853,7 +857,7 @@ private fun parseWav(data: ByteArray): AudioData? {
     val finalSamples = downmixToMono(downsampledSamples, channels)
 
     val adpcmData = imaAdpcmEncode(finalSamples, 1)
-    return AudioData(AUDIO_FORMAT_ADPCM, finalRate, 1, 4, adpcmData)
+    return AudioData(AUDIO_FORMAT_ADPCM, finalRate, 1, 4, adpcmData, finalSamples.size)
 }
 
 private fun readShortLE(data: ByteArray, offset: Int): Int {
@@ -903,7 +907,7 @@ private fun parseOgg(data: ByteArray): AudioData? {
 
     // Encode to IMA ADPCM
     val adpcmData = imaAdpcmEncode(finalSamples, 1)
-    return AudioData(AUDIO_FORMAT_ADPCM, finalRate, 1, 4, adpcmData)
+    return AudioData(AUDIO_FORMAT_ADPCM, finalRate, 1, 4, adpcmData, finalSamples.size)
 }
 
 // Downsample interleaved PCM samples to 22050 Hz using linear interpolation.
