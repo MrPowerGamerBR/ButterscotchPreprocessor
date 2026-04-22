@@ -40,7 +40,7 @@ object ClutProcessor {
         return when {
             16 >= uniqueColors.size -> buildDirectClut(name, w, h, pixels, uniqueColors, 4)
             256 >= uniqueColors.size -> buildDirectClut(name, w, h, pixels, uniqueColors, 8)
-            else -> buildQuantizedClut(name, w, h, pixels, uniqueColors)
+            else -> buildQuantizedClut(name, w, h, pixels, uniqueColors, 8)
         }
     }
 
@@ -61,96 +61,82 @@ object ClutProcessor {
     }
 
     private fun buildQuantizedClut(
-        name: String, w: Int, h: Int, pixels: IntArray,
-        uniqueColors: Set<Int>
+        name: String,
+        w: Int,
+        h: Int,
+        pixels: IntArray,
+        uniqueColors: Set<Int>,
+        targetBpp: Int
     ): ClutImage {
+        val paletteSlots = if (targetBpp == 4) 16 else 256
         val hasTransparent = uniqueColors.contains(0)
-        val opaquePixels = if (hasTransparent) pixels.filter { (it ushr 24) != 0 } else pixels.toList()
+        val opaquePixels = if (hasTransparent) {
+            pixels.filter { (it ushr 24) != 0 }.toIntArray()
+        } else {
+            pixels.copyOf()
+        }
 
         if (opaquePixels.isEmpty()) {
-            // Entirely transparent image
-            val palette = IntArray(16)
-            return ClutImage(name, w, h, 4, palette, 1, ByteArray(pixels.size))
+            val palette = IntArray(paletteSlots)
+            return ClutImage(name, w, h, targetBpp, palette, 1, ByteArray(pixels.size))
         }
 
-        // Build BGR byte array for NeuQuant
-        val bgrBytes = ByteArray(opaquePixels.size * 3)
-        for ((i, argb) in opaquePixels.withIndex()) {
-            bgrBytes[i * 3] = (argb and 0xFF).toByte()
-            bgrBytes[i * 3 + 1] = ((argb shr 8) and 0xFF).toByte()
-            bgrBytes[i * 3 + 2] = ((argb shr 16) and 0xFF).toByte()
-        }
+        val maxQuantColors = if (hasTransparent) paletteSlots - 1 else paletteSlots
+        val quantPalette = MedianCut.quantize(opaquePixels, maxQuantColors)
 
-        val inputBytes = if (NEUQUANT_MINIMUM > bgrBytes.size) {
-            // Duplicate pixel data to meet the minimum
-            val expanded = ByteArray(NEUQUANT_MINIMUM)
-            var pos = 0
-            while (NEUQUANT_MINIMUM > pos) {
-                val toCopy = minOf(bgrBytes.size, NEUQUANT_MINIMUM - pos)
-                bgrBytes.copyInto(expanded, pos, 0, toCopy)
-                pos += toCopy
-            }
-            expanded
-        } else {
-            bgrBytes
-        }
+        val unsortedPalette = mutableListOf<Int>()
+        if (hasTransparent) unsortedPalette.add(0x00000000)
+        for (c in quantPalette) unsortedPalette.add(c)
 
-        val sampleFac = if (opaquePixels.size > 10000) 10 else 1
-        val nq = NeuQuant(inputBytes, inputBytes.size, sampleFac)
-        val colorMap = nq.process() // 768 bytes BGR, 256 colors
-
-        // Build ARGB palette from NeuQuant result
-        val paletteOffset = if (hasTransparent) 1 else 0
-        val nqColorCount = 256 - paletteOffset // how many NeuQuant colors we can fit
-
-        // Convert NeuQuant colormap to ARGB and collect as a sorted palette
-        val nqColors = mutableListOf<Int>()
-        if (hasTransparent) nqColors.add(0x00000000)
-        for (i in 0 until nqColorCount) {
-            val b = colorMap[i * 3].toInt() and 0xFF
-            val g = colorMap[i * 3 + 1].toInt() and 0xFF
-            val r = colorMap[i * 3 + 2].toInt() and 0xFF
-            nqColors.add((0xFF shl 24) or (r shl 16) or (g shl 8) or b)
-        }
-
-        // Sort palette canonically by unsigned ARGB
-        val sortedColors = nqColors.sortedBy { it.toUInt() }.toIntArray()
-        val palette = IntArray(256)
+        // Sort canonically by unsigned ARGB to match the rest of the pipeline
+        val sortedColors = unsortedPalette.sortedBy { it.toUInt() }.toIntArray()
+        val palette = IntArray(paletteSlots)
         sortedColors.copyInto(palette)
 
-        // Build a fast lookup: NeuQuant index -> ARGB color
-        val nqIdxToArgb = IntArray(256)
-        for (i in 0 until 256) {
-            val b = colorMap[i * 3].toInt() and 0xFF
-            val g = colorMap[i * 3 + 1].toInt() and 0xFF
-            val r = colorMap[i * 3 + 2].toInt() and 0xFF
-            nqIdxToArgb[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-
-        // Build a reverse lookup: ARGB color -> sorted palette index
-        val colorToSortedIdx = HashMap<Int, Int>(sortedColors.size * 2)
-        for ((i, c) in sortedColors.withIndex()) colorToSortedIdx[c] = i
-
-        // Map pixels
+        // Cache nearest-color lookups; sprites usually have heavy color repetition
+        val cache = HashMap<Int, Int>()
         val indices = ByteArray(pixels.size) { idx ->
             val argb = pixels[idx]
             if ((argb ushr 24) == 0) {
-                // Transparent pixel
-                colorToSortedIdx[0x00000000]?.toByte() ?: 0
+                // sortedColors[0] is 0x00000000 when hasTransparent; otherwise this branch is unreachable
+                0
             } else {
-                val b = argb and 0xFF
-                val g = (argb shr 8) and 0xFF
-                val r = (argb shr 16) and 0xFF
-                val nqIdx = nq.map(b, g, r)
-                // Clamp to the range we actually use
-                val clampedNqIdx = minOf(nqIdx, nqColorCount - 1)
-                val nqArgb = nqIdxToArgb[clampedNqIdx]
-                (colorToSortedIdx[nqArgb] ?: 0).toByte()
+                val cached = cache[argb]
+                if (cached != null) {
+                    cached.toByte()
+                } else {
+                    val n = nearestOpaqueSortedIdx(argb, sortedColors, hasTransparent)
+                    cache[argb] = n
+                    n.toByte()
+                }
             }
         }
 
-        return ClutImage(name, w, h, 8, palette, sortedColors.size, indices)
+        return ClutImage(name, w, h, targetBpp, palette, sortedColors.size, indices)
     }
+
+    // Nearest-color search by squared RGB distance, skipping the transparent slot.
+    fun nearestOpaqueSortedIdx(argb: Int, sortedColors: IntArray, hasTransparent: Boolean): Int {
+        val r = (argb shr 16) and 0xFF
+        val g = (argb shr 8) and 0xFF
+        val b = argb and 0xFF
+        val start = if (hasTransparent) 1 else 0
+        var bestIdx = start
+        var bestDist = Int.MAX_VALUE
+        for (i in start until sortedColors.size) {
+            val c = sortedColors[i]
+            val dr = ((c shr 16) and 0xFF) - r
+            val dg = ((c shr 8) and 0xFF) - g
+            val db = (c and 0xFF) - b
+            val d = dr * dr + dg * dg + db * db
+            if (bestDist > d) {
+                bestDist = d
+                bestIdx = i
+            }
+        }
+        return bestIdx
+    }
+
 
     // Get the set of actually-used colors from a ClutImage's palette
     fun getUsedColorSet(img: ClutImage): Set<Int> {
