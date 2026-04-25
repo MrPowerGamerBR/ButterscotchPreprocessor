@@ -297,6 +297,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
         mutableStateSetOf<String>()
     }
     var selectedPreset by remember { mutableStateOf<Preset?>(UNDERTALE_PRESET) }
+    var startTime by remember { mutableStateOf(0.0) }
 
     val applyPreset = { preset: Preset ->
         selectedPreset = preset
@@ -363,7 +364,6 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 val soundsBin = jsInt8ArrayToByteArray(msg.sounds)
 
                                 val dataWinBytes = loadedFileBytes!!
-
 
                                 // Use custom ELF if provided, otherwise fetch default from resources
                                 val validBytecodeVersion = if (parsedDataWin.gen8.bytecodeVersion == 17) 17 else 16
@@ -461,7 +461,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 isoFileName = "${gameName}.iso"
                                 val blob = Blob(arrayOf(isoBytes), BlobPropertyBag(type = "application/octet-stream"))
                                 downloadUrl = URL.createObjectURL(blob)
-                                status = "Done!"
+                                status = "Done! Took ${Date.now() - startTime}ms"
                                 plausible("Generated PS2 ISO")
                             } catch (e: Exception) {
                                 status = "Error creating ISO: ${e.message}"
@@ -1070,6 +1070,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 onClick {
                     val bytes = loadedFileBytes ?: return@onClick
                     processing = true
+                    startTime = Date.now()
                     logMessages.clear()
                     status = "Processing..."
 
