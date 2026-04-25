@@ -9,12 +9,18 @@ import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.mrpowergamerbr.butterscotchpreprocessor.ButterWorkerClient
 import com.mrpowergamerbr.butterscotchpreprocessor.ButterscotchPreprocessorWeb
 import com.mrpowergamerbr.butterscotchpreprocessor.DataWin
 import com.mrpowergamerbr.butterscotchpreprocessor.DataWinParserOptions
 import com.mrpowergamerbr.butterscotchpreprocessor.GMLKey
 import com.mrpowergamerbr.butterscotchpreprocessor.Iso9660Creator
 import com.mrpowergamerbr.butterscotchpreprocessor.PS2PadKey
+import com.mrpowergamerbr.butterscotchpreprocessor.network.S2CErrorPacket
+import com.mrpowergamerbr.butterscotchpreprocessor.network.S2CPacketType
+import com.mrpowergamerbr.butterscotchpreprocessor.network.S2CProcessResultPacket
+import com.mrpowergamerbr.butterscotchpreprocessor.network.S2CProgressPacket
+import com.mrpowergamerbr.butterscotchpreprocessor.network.c2sProcessDataWin
 import com.mrpowergamerbr.butterscotchpreprocessor.components.colorpicker.Color
 import com.mrpowergamerbr.butterscotchpreprocessor.components.colorpicker.ColorPicker
 import com.mrpowergamerbr.butterscotchpreprocessor.plausible
@@ -338,32 +344,24 @@ fun App(m: ButterscotchPreprocessorWeb) {
     val scope = rememberCoroutineScope()
 
     // Create the worker once, loading the same script in a worker context
-    val worker = remember {
-        Worker("/assets/js/processor-web.js?v=${js("window.jsBundleHash") as String}").also { w ->
-            w.asDynamic().onmessage = { event: dynamic ->
-                val msg: dynamic = event.data
-                when (msg.type as String) {
-                    "progress" -> {
-                        val progressMsg = msg.message as String
-                        println(progressMsg)
-                        logMessages.add(progressMsg)
-                    }
-                    "result" -> {
-                        val parsedDataWin = parsedDataWin!!
+    val workerClient = remember { ButterWorkerClient() }
 
-                        scope.launch {
-                            try {
-                                status = "Creating ISO..."
+    // Helper: handle a successful processing result by packaging everything into an ISO
+    suspend fun handleProcessingResult(result: S2CProcessResultPacket) {
+        run {
+            val parsedDataWin = parsedDataWin!!
+            try {
+                status = "Creating ISO..."
 
-                                val gameName = msg.gameName as String
-                                val clut4Bin = jsInt8ArrayToByteArray(msg.clut4)
-                                val clut8Bin = jsInt8ArrayToByteArray(msg.clut8)
-                                val texturesBin = jsInt8ArrayToByteArray(msg.textures)
-                                val atlasBin = jsInt8ArrayToByteArray(msg.atlas)
-                                val soundBnkBin = jsInt8ArrayToByteArray(msg.soundBnk)
-                                val soundsBin = jsInt8ArrayToByteArray(msg.sounds)
+                val gameName = result.gameName
+                val clut4Bin = result.clut4Bin.unsafeCast<ByteArray>()
+                val clut8Bin = result.clut8Bin.unsafeCast<ByteArray>()
+                val texturesBin = result.texturesBin.unsafeCast<ByteArray>()
+                val atlasBin = result.atlasBin.unsafeCast<ByteArray>()
+                val soundBnkBin = result.soundBnkBin.unsafeCast<ByteArray>()
+                val soundsBin = result.soundsBin.unsafeCast<ByteArray>()
 
-                                val dataWinBytes = loadedFileBytes!!
+                val dataWinBytes = loadedFileBytes!!
 
                                 // Use custom ELF if provided, otherwise fetch default from resources
                                 val validBytecodeVersion = if (parsedDataWin.gen8.bytecodeVersion == 17) 17 else 16
@@ -463,19 +461,11 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 downloadUrl = URL.createObjectURL(blob)
                                 status = "Done! Took ${Date.now() - startTime}ms"
                                 plausible("Generated PS2 ISO")
-                            } catch (e: Exception) {
-                                status = "Error creating ISO: ${e.message}"
-                                logMessages.add("Error: ${e.stackTraceToString()}")
-                            } finally {
-                                processing = false
-                            }
-                        }
-                    }
-                    "error" -> {
-                        status = "Error: ${msg.message}"
-                        processing = false
-                    }
-                }
+            } catch (e: Exception) {
+                status = "Error creating ISO: ${e.message}"
+                logMessages.add("Error: ${e.stackTraceToString()}")
+            } finally {
+                processing = false
             }
         }
     }
@@ -1074,40 +1064,42 @@ fun App(m: ButterscotchPreprocessorWeb) {
                     logMessages.clear()
                     status = "Processing..."
 
-                    // Build external audio map as a JS object for the worker
-                    val externalAudio = loadedExternalAudio
+                    scope.launch {
+                        try {
+                            val response = workerClient.sendPacket(
+                                c2sProcessDataWin(
+                                    bytes,
+                                    loadedExternalAudio,
+                                    loadedAudioGroupFiles,
+                                    loadedMusFiles,
+                                    force4bppPatterns.toList()
+                                ),
+                                onEvent = { event ->
+                                    if (event.type == S2CPacketType.PROGRESS) {
+                                        val progress = event.unsafeCast<S2CProgressPacket>()
+                                        println(progress.message)
+                                        logMessages.add(progress.message)
+                                    }
+                                }
+                            )
 
-                    val audioObj = unsafeJso<dynamic> {
-                        for ((name, data) in externalAudio) {
-                            this[name] = data
+                            when (response.type) {
+                                S2CPacketType.PROCESS_RESULT -> handleProcessingResult(response.unsafeCast<S2CProcessResultPacket>())
+                                S2CPacketType.ERROR -> {
+                                    val err = response.unsafeCast<S2CErrorPacket>()
+                                    status = "Error: ${err.message}"
+                                    processing = false
+                                }
+                                else -> {
+                                    status = "Error: unexpected response ${response.type}"
+                                    processing = false
+                                }
+                            }
+                        } catch (e: Exception) {
+                            status = "Error: ${e.message}"
+                            processing = false
                         }
                     }
-
-                    // Build audiogroup map as a JS object for the worker
-                    val audioGroupObj = unsafeJso<dynamic> {
-                        for ((groupId, data) in loadedAudioGroupFiles) {
-                            this[groupId.toString()] = data
-                        }
-                    }
-
-                    // Build mus files map as a JS object for the worker
-                    val musObj = unsafeJso<dynamic> {
-                        for ((path, data) in loadedMusFiles) {
-                            this[path] = data
-                        }
-                    }
-
-                    // Send data to worker (no transfer - we need the bytes later for the ISO)
-                    worker.asDynamic().postMessage(
-                        unsafeJso {
-                            this.type = "process"
-                            this.data = bytes
-                            this.externalAudio = audioObj
-                            this.audioGroups = audioGroupObj
-                            this.musFiles = musObj
-                            this.force4bppPatterns = force4bppPatterns.toTypedArray()
-                        }
-                    )
                 }
             }) {
                 Text("Generate PlayStation 2 ISO")

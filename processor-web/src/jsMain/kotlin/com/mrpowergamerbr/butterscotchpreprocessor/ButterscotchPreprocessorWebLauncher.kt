@@ -7,7 +7,8 @@ fun main() {
     val m = ButterscotchPreprocessorWeb()
 
     if (isWorker) {
-        m.startWorker()
+        val server = ButterWorkerServer()
+        server.startWorker()
     } else {
         m.start()
     }

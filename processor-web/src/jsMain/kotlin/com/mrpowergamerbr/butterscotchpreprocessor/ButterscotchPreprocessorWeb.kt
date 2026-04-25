@@ -12,6 +12,8 @@ import net.perfectdreams.luna.modals.ModalManager
 import org.jetbrains.compose.web.renderComposable
 import web.dom.ElementId
 import web.dom.document
+import web.navigator.navigator
+import web.workers.Worker
 
 class ButterscotchPreprocessorWeb {
     companion object {
@@ -20,98 +22,6 @@ class ButterscotchPreprocessorWeb {
     }
     val modalManager = ModalManager {
         onDispose {}
-    }
-
-    fun startWorker() {
-        val self: dynamic = js("self")
-        val scope = CoroutineScope(Dispatchers.Default)
-
-        self.onmessage = { event: dynamic ->
-            val msg: dynamic = event.data
-            val type = msg.type as String
-
-            when (type) {
-                "process" -> {
-                    // Receive the data.win ArrayBuffer
-                    val arrayBuffer: dynamic = msg.data
-                    val bytes = js("new Int8Array(arrayBuffer)").unsafeCast<ByteArray>()
-
-                    // Receive external audio files
-                    val externalAudioObj: dynamic = msg.externalAudio
-                    val externalAudioFiles = HashMap<String, ByteArray>()
-                    val keys = js("Object.keys(externalAudioObj)").unsafeCast<Array<String>>()
-                    for (key in keys) {
-                        val audioData = externalAudioObj[key]
-                        externalAudioFiles[key] = js("new Int8Array(audioData)").unsafeCast<ByteArray>()
-                    }
-
-                    // Receive audiogroup files
-                    val audioGroupObj: dynamic = msg.audioGroups
-                    val audioGroupFiles = HashMap<Int, ByteArray>()
-                    if (audioGroupObj != null && audioGroupObj != undefined) {
-                        val agKeys = Object.keys(audioGroupObj)
-                        for (key in agKeys) {
-                            val groupData = audioGroupObj[key]
-                            audioGroupFiles[key.toInt()] = Int8Array(groupData as ArrayBufferLike).unsafeCast<ByteArray>()
-                        }
-                    }
-
-                    // Receive streamed music files
-                    val musFilesObj: dynamic = msg.musFiles
-                    val musFiles = HashMap<String, ByteArray>()
-                    if (musFilesObj != null && musFilesObj != undefined) {
-                        val musKeys = Object.keys(musFilesObj)
-                        for (key in musKeys) {
-                            val musData = musFilesObj[key]
-                            musFiles[key] = Int8Array(musData as ArrayBufferLike).unsafeCast<ByteArray>()
-                        }
-                    }
-
-                    val force4bppPatternsArr: dynamic = msg.force4bppPatterns
-                    val force4bppPatterns = mutableListOf<String>()
-                    if (force4bppPatternsArr != null && force4bppPatternsArr != undefined) {
-                        val len = (force4bppPatternsArr.length as Int)
-                        for (i in 0 until len) {
-                            force4bppPatterns.add(force4bppPatternsArr[i] as String)
-                        }
-                    }
-
-                    scope.launch {
-                        try {
-                            val result = processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles, force4bppPatterns) { progressMsg ->
-                                self.postMessage(
-                                    unsafeJso {
-                                        this.type = "progress"
-                                        this.message = progressMsg
-                                    }
-                                )
-                            }
-
-                            // Send result back with all the byte arrays
-                            val resultMsg = unsafeJso<dynamic> {
-                                this.type = "result"
-                                this.gameName = result.gameName
-                                this.clut4 = result.clut4Bin
-                                this.clut8 = result.clut8Bin
-                                this.textures = result.texturesBin
-                                this.atlas = result.atlasBin
-                                this.soundBnk = result.soundBnkBin
-                                this.sounds = result.soundsBin
-                            }
-
-                            self.postMessage(resultMsg)
-                        } catch (e: Exception) {
-                            self.postMessage(
-                                unsafeJso {
-                                    this.type = "error"
-                                    this.message = (e.message ?: "Unknown error")
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 
     fun start() {

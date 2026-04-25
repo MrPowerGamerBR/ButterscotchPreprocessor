@@ -57,7 +57,14 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
 
         // Core processing via common pipeline
         val result = runBlocking {
-            processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles, force4bppPatterns) { echo(it) }
+            processDataWin(
+                bytes,
+                externalAudioFiles,
+                audioGroupFiles,
+                musFiles,
+                force4bppPatterns,
+                audioDecoder = { parseWav(it) ?: parseOgg(it) }
+            ) { echo(it) }
         }
 
         // Write output files

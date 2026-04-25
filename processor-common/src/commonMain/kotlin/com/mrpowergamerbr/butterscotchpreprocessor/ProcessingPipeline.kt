@@ -1,5 +1,10 @@
 package com.mrpowergamerbr.butterscotchpreprocessor
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
 class ProcessingResult(
     val gameName: String,
     val clut4Bin: ByteArray,
@@ -14,7 +19,7 @@ class ProcessingResult(
 private const val AUDIO_FORMAT_PCM = 0
 private const val AUDIO_FORMAT_ADPCM = 1
 
-private class AudioData(
+data class AudioData(
     val format: Int,         // AUDIO_FORMAT_PCM or AUDIO_FORMAT_ADPCM
     val sampleRate: Int,
     val channels: Int,
@@ -32,6 +37,7 @@ suspend fun processDataWin(
     audioGroupFiles: Map<Int, ByteArray> = emptyMap(),
     musFiles: Map<String, ByteArray> = emptyMap(),
     force4bppPatterns: List<String> = emptyList(),
+    audioDecoder: suspend (ByteArray) -> (AudioData?),
     progressCallback: ((String) -> Unit)? = null
 ): ProcessingResult {
     val log = progressCallback ?: {}
@@ -351,8 +357,17 @@ suspend fun processDataWin(
     log("Decoding embedded audio files...")
 
     // Decode embedded AUDO entries from the main data.win (audiogroup 0)
-    val parsedAudio = dw.audo.entries.map { entry ->
-        if (entry.data != null) (parseWav(entry.data) ?: parseOgg(entry.data)) else null
+    // The async block per entry preserves index alignment with dw.audo.entries
+    // (entries with null data resolve to null in-place, instead of being filtered out)
+    val parsedAudio = coroutineScope {
+        dw.audo.entries.mapIndexed { idx, entry ->
+            async(Dispatchers.Default) {
+                if (entry.data == null) return@async null
+                val decoded = audioDecoder.invoke(entry.data)
+                log("  Decoded embedded audio #$idx${if (decoded == null) " (FAILED)" else ""}")
+                decoded
+            }
+        }.awaitAll()
     }.toMutableList()
     val embeddedCount = parsedAudio.count { it != null }
 
@@ -360,20 +375,29 @@ suspend fun processDataWin(
     // sondIndex -> new audoIndex in parsedAudio
     val externalAudoMap = HashMap<Int, Int>()
     var audioGroupCount = 0
-    for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
-        if (sound.audioGroup == 0) continue
-        val groupAudo = audioGroupAudo[sound.audioGroup] ?: continue
-        if (0 > sound.audioFile || sound.audioFile >= groupAudo.entries.size) continue
 
-        val entry = groupAudo.entries[sound.audioFile]
-        if (entry.data != null) {
-            val decoded = parseWav(entry.data) ?: parseOgg(entry.data)
-            if (decoded != null) {
-                val newAudoIndex = parsedAudio.size
-                parsedAudio.add(decoded)
-                externalAudoMap[sondIdx] = newAudoIndex
-                audioGroupCount++
+    // Dispatch decodes in parallel, then assign indices in serial order so the
+    // sondIdx -> audoIndex mapping is deterministic regardless of completion order
+    val audioGroupDecodes = coroutineScope {
+        dw.sond.sounds.withIndex().mapNotNull { (sondIdx, sound) ->
+            if (sound.audioGroup == 0) return@mapNotNull null
+            val groupAudo = audioGroupAudo[sound.audioGroup] ?: return@mapNotNull null
+            if (0 > sound.audioFile || sound.audioFile >= groupAudo.entries.size) return@mapNotNull null
+            val entry = groupAudo.entries[sound.audioFile]
+            if (entry.data == null) return@mapNotNull null
+            val label = sound.file ?: sound.name ?: "audiogroup${sound.audioGroup}/${sound.audioFile}"
+            sondIdx to async(Dispatchers.Default) {
+                val decoded = audioDecoder.invoke(entry.data)
+                log("  Decoded $label${if (decoded == null) " (FAILED)" else ""}")
+                decoded
             }
+        }.map { (sondIdx, def) -> sondIdx to def.await() }
+    }
+    for ((sondIdx, decoded) in audioGroupDecodes) {
+        if (decoded != null) {
+            externalAudoMap[sondIdx] = parsedAudio.size
+            parsedAudio.add(decoded)
+            audioGroupCount++
         }
     }
 
@@ -381,26 +405,30 @@ suspend fun processDataWin(
     // These get appended as new AUDO entries at the end of the list
     var externalCount = 0
     log("Decoding non-embedded audio files...")
-    for ((sondIdx, sound) in dw.sond.sounds.withIndex()) {
-        val isEmbedded = (sound.flags and 0x01) != 0
-        if (isEmbedded)
-            continue
+    val externalDecodes = coroutineScope {
+        dw.sond.sounds.withIndex().mapNotNull { (sondIdx, sound) ->
+            val isEmbedded = (sound.flags and 0x01) != 0
+            if (isEmbedded) return@mapNotNull null
+            if (externalAudoMap.containsKey(sondIdx)) return@mapNotNull null
 
-        // Skip sounds already resolved from audiogroup files
-        if (externalAudoMap.containsKey(sondIdx))
-            continue
+            // Non-embedded audio files DO have an entry on the AUDO chunk, but we will ignore them because they are bogus entries
 
-        // Non-embedded audio files DO have an entry on the AUDO chunk, but we will ignore them because they are bogus entries
-
-        val fileName = sound.file ?: continue
-        log("Decoding ${sound.file}...")
-        val fileData = externalAudioFiles[fileName] ?: externalAudioFiles["$fileName.ogg"] ?: externalAudioFiles["$fileName.wav"] ?: continue
-
-        val decoded = parseWav(fileData) ?: parseOgg(fileData)
+            val fileName = sound.file ?: return@mapNotNull null
+            val fileData = externalAudioFiles[fileName]
+                ?: externalAudioFiles["$fileName.ogg"]
+                ?: externalAudioFiles["$fileName.wav"]
+                ?: return@mapNotNull null
+            sondIdx to async(Dispatchers.Default) {
+                val decoded = audioDecoder.invoke(fileData)
+                log("  Decoded ${sound.file}${if (decoded == null) " (FAILED)" else ""}")
+                decoded
+            }
+        }.map { (sondIdx, def) -> sondIdx to def.await() }
+    }
+    for ((sondIdx, decoded) in externalDecodes) {
         if (decoded != null) {
-            val newAudoIndex = parsedAudio.size
+            externalAudoMap[sondIdx] = parsedAudio.size
             parsedAudio.add(decoded)
-            externalAudoMap[sondIdx] = newAudoIndex
             externalCount++
         }
     }
@@ -414,13 +442,22 @@ suspend fun processDataWin(
     val musEntries = mutableListOf<MusEntry>()
     if (musFiles.isNotEmpty()) {
         log("Decoding ${musFiles.size} streamed music files...")
-        for ((path, fileData) in musFiles.entries.sortedBy { it.key }) {
-            val decoded = parseOgg(fileData)
+        val musDecodes = coroutineScope {
+            musFiles.entries.sortedBy { it.key }.map { (path, fileData) ->
+                path to async(Dispatchers.Default) {
+                    val decoded = audioDecoder.invoke(fileData)
+                    if (decoded != null) {
+                        log("  $path: ${decoded.sampleRate}Hz ${decoded.channels}ch -> ADPCM (${decoded.data.size} bytes)")
+                    } else {
+                        log("  $path: FAILED to decode")
+                    }
+                    decoded
+                }
+            }.map { (path, def) -> path to def.await() }
+        }
+        for ((path, decoded) in musDecodes) {
             if (decoded != null) {
                 musEntries.add(MusEntry(path, decoded))
-                log("  $path: ${decoded.sampleRate}Hz ${decoded.channels}ch -> ADPCM (${decoded.data.size} bytes)")
-            } else {
-                log("  $path: FAILED to decode")
             }
         }
         log("  ${musEntries.size}/${musFiles.size} music files decoded")
@@ -792,7 +829,7 @@ private fun writeAtlasMetadataBytes(
 }
 
 // Parse a WAV file and extract raw PCM data. Returns null for non-WAV (e.g. OGG) or non-PCM formats.
-private fun parseWav(data: ByteArray): AudioData? {
+fun parseWav(data: ByteArray): AudioData? {
     if (4 > data.size) return null
 
     // Check RIFF magic
@@ -882,7 +919,7 @@ private fun readIntLE(data: ByteArray, offset: Int): Int {
 
 // Decode an OGG Vorbis file and encode to IMA ADPCM.
 // Returns null if the data is not a valid OGG Vorbis file.
-private fun parseOgg(data: ByteArray): AudioData? {
+fun parseOgg(data: ByteArray): AudioData? {
     val (vorbis, _) = StbVorbis.openMemory(data)
     if (vorbis == null) return null
 
