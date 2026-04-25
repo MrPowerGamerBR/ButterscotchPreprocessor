@@ -110,6 +110,17 @@ class ButterscotchPreprocessorWebServer(
                                                 }
                                             }
                                         }
+
+                                        li {
+                                            text("PlayStation 2 Fat (SCPH-39001)")
+
+                                            ul {
+                                                li {
+                                                    text("OPL v1.2.0-Beta-1996-b6717a (USB)")
+                                                }
+                                            }
+                                        }
+
                                         li {
                                             text("PCSX2 v2.6.3")
                                         }
