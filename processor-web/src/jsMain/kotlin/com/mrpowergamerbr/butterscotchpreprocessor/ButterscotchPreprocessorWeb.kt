@@ -67,9 +67,18 @@ class ButterscotchPreprocessorWeb {
                         }
                     }
 
+                    val force4bppPatternsArr: dynamic = msg.force4bppPatterns
+                    val force4bppPatterns = mutableListOf<String>()
+                    if (force4bppPatternsArr != null && force4bppPatternsArr != undefined) {
+                        val len = (force4bppPatternsArr.length as Int)
+                        for (i in 0 until len) {
+                            force4bppPatterns.add(force4bppPatternsArr[i] as String)
+                        }
+                    }
+
                     scope.launch {
                         try {
-                            val result = processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles) { progressMsg ->
+                            val result = processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles, force4bppPatterns) { progressMsg ->
                                 self.postMessage(
                                     unsafeJso {
                                         this.type = "progress"

@@ -4,6 +4,7 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.path
 import kotlinx.coroutines.runBlocking
@@ -25,6 +26,9 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
 
     val debugOutputDir by option("--debug-output", help = "Directory for debug output (sprites, backgrounds, fonts, tiles, atlas debug images)")
         .path()
+
+    val force4bppPatterns by option("--force-4bpp", help = "Force images whose names match this regex to be quantized to 4bpp (16 colors max). The regex must match the entire image name (example: spr_test.*). Can be passed multiple times.")
+        .multiple()
 
     override fun run() {
         val dataWinFile = dataWinPath.toFile()
@@ -53,7 +57,7 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
 
         // Core processing via common pipeline
         val result = runBlocking {
-            processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles) { echo(it) }
+            processDataWin(bytes, externalAudioFiles, audioGroupFiles, musFiles, force4bppPatterns) { echo(it) }
         }
 
         // Write output files

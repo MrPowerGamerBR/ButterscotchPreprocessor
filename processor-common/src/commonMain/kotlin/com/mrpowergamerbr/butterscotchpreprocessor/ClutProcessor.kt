@@ -24,7 +24,7 @@ object ClutProcessor {
     // NeuQuant requires at least 3*503 = 1509 bytes
     private const val NEUQUANT_MINIMUM = 1509
 
-    fun createClutImage(name: String, img: PixelImage): ClutImage {
+    fun createClutImage(name: String, img: PixelImage, force4bpp: Boolean): ClutImage {
         val w = img.width
         val h = img.height
         val pixels = img.pixels.copyOf()
@@ -36,6 +36,14 @@ object ClutProcessor {
 
         val uniqueColors = mutableSetOf<Int>()
         for (p in pixels) uniqueColors.add(p)
+
+        if (force4bpp) {
+            return if (16 >= uniqueColors.size) {
+                buildDirectClut(name, w, h, pixels, uniqueColors, 4)
+            } else {
+                buildQuantizedClut(name, w, h, pixels, uniqueColors, 4)
+            }
+        }
 
         return when {
             16 >= uniqueColors.size -> buildDirectClut(name, w, h, pixels, uniqueColors, 4)

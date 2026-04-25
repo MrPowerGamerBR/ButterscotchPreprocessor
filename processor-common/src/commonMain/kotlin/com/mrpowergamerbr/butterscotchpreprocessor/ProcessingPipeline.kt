@@ -31,6 +31,7 @@ suspend fun processDataWin(
     externalAudioFiles: Map<String, ByteArray> = emptyMap(),
     audioGroupFiles: Map<Int, ByteArray> = emptyMap(),
     musFiles: Map<String, ByteArray> = emptyMap(),
+    force4bppPatterns: List<String> = emptyList(),
     progressCallback: ((String) -> Unit)? = null
 ): ProcessingResult {
     val log = progressCallback ?: {}
@@ -258,10 +259,17 @@ suspend fun processDataWin(
 
     // Step 1: Create CLUTs
     log("Creating CLUTs...")
+    val force4bppMatchers = force4bppPatterns.map { Regex(it) }
     val clutImages = mutableListOf<ClutImage>()
+    var forced4bppCount = 0
     for ((name, img) in allImages) {
-        val clutImage = ClutProcessor.createClutImage(name, img)
+        val force4bpp = force4bppMatchers.any { it.matches(name) }
+        if (force4bpp) forced4bppCount++
+        val clutImage = ClutProcessor.createClutImage(name, img, force4bpp)
         clutImages.add(clutImage)
+    }
+    if (force4bppMatchers.isNotEmpty()) {
+        log("  Forced ${forced4bppCount} images to 4bpp via ${force4bppMatchers.size} pattern(s)")
     }
 
     val bpp4Count = clutImages.count { it.bpp == 4 }

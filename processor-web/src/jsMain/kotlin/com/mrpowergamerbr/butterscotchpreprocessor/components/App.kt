@@ -106,6 +106,7 @@ data class Preset(
     val lazyLoadRooms: Boolean,
     val eagerlyLoadedRooms: Set<String>,
     val debugOverlayEnabled: Boolean,
+    val force4bppPatterns: Set<String>,
 )
 
 private val UNDERTALE_PRESET = Preset(
@@ -147,6 +148,7 @@ private val UNDERTALE_PRESET = Preset(
     lazyLoadRooms = false,
     eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
 )
 
 private val SURVEY_PROGRAM_PRESET = Preset(
@@ -178,6 +180,7 @@ private val SURVEY_PROGRAM_PRESET = Preset(
     lazyLoadRooms = false,
     eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
 )
 
 private val DELTARUNE_CHAPTER_1_AND_2_PRESET = Preset(
@@ -216,6 +219,7 @@ private val DELTARUNE_CHAPTER_1_AND_2_PRESET = Preset(
     lazyLoadRooms = true,
     eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
 )
 
 private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET, DELTARUNE_CHAPTER_1_AND_2_PRESET)
@@ -286,6 +290,9 @@ fun App(m: ButterscotchPreprocessorWeb) {
     }
     var debugOverlayEnabled by remember { mutableStateOf(true) }
     var lazyLoadRooms by remember { mutableStateOf(false) }
+    val force4bppPatterns = remember {
+        mutableStateSetOf<String>()
+    }
     val eagerlyLoadedRooms = remember {
         mutableStateSetOf<String>()
     }
@@ -323,6 +330,8 @@ fun App(m: ButterscotchPreprocessorWeb) {
         lazyLoadRooms = preset.lazyLoadRooms
         eagerlyLoadedRooms.clear()
         eagerlyLoadedRooms.addAll(preset.eagerlyLoadedRooms)
+        force4bppPatterns.clear()
+        force4bppPatterns.addAll(preset.force4bppPatterns)
     }
 
     val scope = rememberCoroutineScope()
@@ -979,6 +988,12 @@ fun App(m: ButterscotchPreprocessorWeb) {
                 debugOverlayEnabled = !debugOverlayEnabled
             }
 
+            StringSetTable(
+                "Force 4bpp Images (regex, must match the full image name, example: spr_test.*)",
+                "Image Name Regex",
+                force4bppPatterns
+            )
+
             FieldWrapper {
                 Div(attrs = {
                     classes("field-information-with-control")
@@ -1089,6 +1104,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                             this.externalAudio = audioObj
                             this.audioGroups = audioGroupObj
                             this.musFiles = musObj
+                            this.force4bppPatterns = force4bppPatterns.toTypedArray()
                         }
                     )
                 }
