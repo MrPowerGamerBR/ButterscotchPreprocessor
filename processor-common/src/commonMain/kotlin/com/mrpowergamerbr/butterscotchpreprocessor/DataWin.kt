@@ -146,6 +146,7 @@ class Sprite {
     var sSpriteType = 0
     var gms2PlaybackSpeed = 0f
     var gms2PlaybackSpeedType = false
+    var specialType = false
     var textureOffsets = intArrayOf()
     var masks: List<ByteArray>? = null
 }
@@ -162,13 +163,17 @@ class Background {
     var preload = false
     var textureOffset = 0
     // GMS2 tile set fields
+    var gms2UnknownAlways2 = 0
     var gms2TileWidth = 0
     var gms2TileHeight = 0
+    var gms2TileSeparationX = 0
+    var gms2TileSeparationY = 0
     var gms2OutputBorderX = 0
     var gms2OutputBorderY = 0
     var gms2TileColumns = 0
     var gms2ItemsPerTileCount = 0
     var gms2TileCount = 0
+    var gms2ExportedSpriteIndex = 0
     var gms2FrameLength = 0L
     var gms2TileIds = intArrayOf()
 }
@@ -369,7 +374,17 @@ class Font {
     var textureOffset = 0
     var scaleX = 0f
     var scaleY = 0f
+    var ascenderOffset = 0
+    var ascender = 0
+    var sdfSpread = 0
+    var lineHeight = 0
+    var hasAscender = false
+    var hasSDFSpread = false
+    var hasLineHeight = false
     var glyphs = emptyList<FontGlyph>()
+    var maxGlyphHeight = 0
+    var isSpriteFont = false
+    var spriteIndex = -1
 }
 
 class FontChunk {
@@ -404,7 +419,7 @@ class Tmln {
 }
 
 // ===[ OBJT ]===
-const val OBJT_EVENT_TYPE_COUNT = 12
+const val OBJT_EVENT_TYPE_COUNT = 15
 
 class ObjectEvent(val eventSubtype: Int, val actions: List<EventAction>)
 
@@ -416,6 +431,7 @@ class GameObject {
     var name: String? = null
     var spriteId = 0
     var visible = false
+    var managed = false
     var solid = false
     var depth = 0
     var persistent = false
@@ -480,9 +496,11 @@ class RoomGameObject {
     var creationCode = 0
     var scaleX = 0f
     var scaleY = 0f
+    var imageSpeed = 1.0f
+    var imageIndex = 0
     var color = 0
     var rotation = 0f
-    var preCreateCode = 0
+    var preCreateCode = -1
 }
 
 class RoomTile {
@@ -503,18 +521,56 @@ class RoomTile {
 
 // GMS2 room layer types
 object RoomLayerType {
+    const val PATH = 0
     const val BACKGROUND = 1
     const val INSTANCES = 2
     const val ASSETS = 3
-    const val PATH = 6
+    const val TILES = 4
+    const val EFFECT = 6
+    const val PATH2 = 7
+}
+
+class SpriteInstance {
+    var name: String? = null
+    var spriteIndex = 0
+    var x = 0
+    var y = 0
+    var scaleX = 0f
+    var scaleY = 0f
+    var color = 0
+    var animationSpeed = 0f
+    var animationSpeedType = 0
+    var frameIndex = 0f
+    var rotation = 0f
 }
 
 class RoomLayerAssetsData {
     var legacyTiles = emptyList<RoomTile>()
+    var sprites = emptyList<SpriteInstance>()
 }
 
 class RoomLayerBackgroundData {
+    var visible = false
+    var foreground = false
     var spriteIndex = -1
+    var hTiled = false
+    var vTiled = false
+    var stretch = false
+    var color = 0
+    var firstFrame = 0f
+    var animSpeed = 0f
+    var animSpeedType = 0
+}
+
+class RoomLayerInstancesData {
+    var instanceIds = intArrayOf()
+}
+
+class RoomLayerTilesData {
+    var backgroundIndex = 0
+    var tilesX = 0
+    var tilesY = 0
+    var tileData = intArrayOf()
 }
 
 class RoomLayer {
@@ -529,6 +585,8 @@ class RoomLayer {
     var visible = false
     var assetsData: RoomLayerAssetsData? = null
     var backgroundData: RoomLayerBackgroundData? = null
+    var instancesData: RoomLayerInstancesData? = null
+    var tilesData: RoomLayerTilesData? = null
 }
 
 class Room {
@@ -593,7 +651,8 @@ class Code {
 // ===[ VARI ]===
 class Variable(
     val name: String?, val instanceType: Int, val varID: Int,
-    val occurrences: Int, val firstAddress: Int
+    val occurrences: Int, val firstAddress: Int,
+    var builtinVarId: Short = -1
 )
 
 class Vari {
@@ -606,7 +665,7 @@ class Vari {
 // ===[ FUNC ]===
 class Function(val name: String?, val occurrences: Int, val firstAddress: Int)
 
-class LocalVar(val index: Int, val name: String?)
+class LocalVar(val varID: Int, val name: String?)
 
 class CodeLocals(val name: String?, val locals: List<LocalVar>)
 
@@ -621,7 +680,17 @@ class Strg {
 }
 
 // ===[ TXTR ]===
-class Texture(val scaled: Int, val blobOffset: Int, val blobSize: Int, val blobData: ByteArray?)
+class Texture(
+    val scaled: Int,
+    val blobOffset: Int,
+    val blobSize: Int,
+    val blobData: ByteArray?,
+    val generatedMips: Int = 0,
+    val textureBlockSize: Int = 0,
+    val textureWidth: Int = 0,
+    val textureHeight: Int = 0,
+    val indexInGroup: Int = 0
+)
 
 class Txtr {
     var textures = emptyList<Texture>()
@@ -664,8 +733,32 @@ class DataWin {
     var bytecodeBufferBase = 0
 
     val tpagOffsetMap = HashMap<Int, Int>()
+    val sprtOffsetMap = HashMap<Int, Int>()
+
+    // Effective GMS version after heuristic detection. GEN8.version is unreliable since GM:S 2,
+    // so chunk parsers probe the data and bump these fields upward when they detect newer-format features.
+    var detectedMajor = 0
+    var detectedMinor = 0
+    var detectedRelease = 0
+    var detectedBuild = 0
 
     fun resolveTPAG(offset: Int): Int = tpagOffsetMap[offset] ?: -1
+    fun resolveSPRT(offset: Int): Int = sprtOffsetMap[offset] ?: -1
+
+    fun isVersionAtLeast(major: Int, minor: Int, release: Int, build: Int): Boolean {
+        if (detectedMajor != major) return detectedMajor > major
+        if (detectedMinor != minor) return detectedMinor > minor
+        if (detectedRelease != release) return detectedRelease > release
+        return detectedBuild >= build
+    }
+
+    fun bumpVersionTo(major: Int, minor: Int, release: Int, build: Int) {
+        if (isVersionAtLeast(major, minor, release, build)) return
+        detectedMajor = major
+        detectedMinor = minor
+        detectedRelease = release
+        detectedBuild = build
+    }
 
     companion object {
         fun parse(bytes: ByteArray, options: DataWinParserOptions = DataWinParserOptions()): DataWin {
@@ -677,8 +770,27 @@ class DataWin {
             require(magic == "FORM") { "Invalid file: expected FORM magic, got '$magic'" }
             reader.readInt32() // form length
 
-            // Single pass: since the entire file is in memory, readStringPtr can seek
-            // to any offset at any time. No need for a separate STRG pre-load pass.
+            // Pass 1: scan chunk names to bump the detected version based on chunk presence.
+            // Some later-introduced chunks (ACRV/SEQN/TAGS/FEDS/EMBI for 2.3, FEAT for 2022.8, etc.)
+            // appear AFTER OBJT in file order. parseOBJT needs to know we're >= 2.3 to probe for
+            // the GMS 2022.5+ Managed field, so we have to bump versions before parsing anything.
+            val passOnePosition = reader.position
+            while (reader.size > reader.position) {
+                if (reader.position + 8 > reader.size) break
+                val name = reader.readChunkName()
+                val len = reader.readInt32()
+                when (name) {
+                    "FEDS", "ACRV", "SEQN", "TAGS", "EMBI" -> dw.bumpVersionTo(2, 3, 0, 0)
+                    "FEAT" -> dw.bumpVersionTo(2022, 8, 0, 0)
+                    "PSEM", "PSYS" -> dw.bumpVersionTo(2023, 4, 0, 0)
+                    "UILR" -> dw.bumpVersionTo(2024, 13, 0, 0)
+                }
+                reader.position += len
+            }
+            reader.position = passOnePosition
+
+            // Pass 2: actually parse the chunks. Since the entire file is in memory, readStringPtr
+            // can seek to any offset at any time. No need for a separate STRG pre-load pass.
             while (reader.size > reader.position) {
                 if (reader.position + 8 > reader.size) break
                 val chunkName = reader.readChunkName()
@@ -776,7 +888,9 @@ class DataWin {
             g.activeTargets = reader.readLong()
             g.functionClassifications = reader.readLong()
             g.steamAppID = reader.readInt32()
-            g.debuggerPort = reader.readInt32()
+            if (g.bytecodeVersion >= 14) {
+                g.debuggerPort = reader.readInt32()
+            }
             val roomOrderCount = reader.readInt32()
             g.roomOrder = IntArray(roomOrderCount) { reader.readInt32() }
 
@@ -787,6 +901,10 @@ class DataWin {
                 reader.skip(4)    // AllowStatistics (bool32)
                 reader.skip(16)   // GameGUID (16 bytes)
             }
+
+            // Seed the detected version from GEN8.
+            // Later chunk parsers may bump these upward when they identify newer-format features, because since GM:S 2 the value in the GEN8 chunk is not accurate.
+            dw.bumpVersionTo(g.major, g.minor, g.release, g.build)
         }
 
         private fun parseOPTN(reader: BinaryReader, dw: DataWin) {
@@ -908,10 +1026,10 @@ class DataWin {
                     // Detect special type (GMS2) vs normal: peek next int32
                     var textureCount = reader.readInt32()
                     if (textureCount == -1) {
-                        // GMS2 special type sprite
+                        specialType = true
                         sVersion = reader.readInt32()
                         sSpriteType = reader.readInt32()
-                        if (dw.gen8.major >= 2) {
+                        if (dw.isVersionAtLeast(2, 0, 0, 0)) {
                             gms2PlaybackSpeed = reader.readFloat32()
                             gms2PlaybackSpeedType = reader.readBool32()
                             if (sVersion >= 2) {
@@ -920,33 +1038,35 @@ class DataWin {
                                     reader.skip(4) // nineSliceOffset
                                 }
                             }
+                            textureCount = reader.readInt32()
                         }
-                        textureCount = reader.readInt32()
                     }
 
                     textureOffsets = IntArray(textureCount) { reader.readInt32() }
 
                     // Collision masks
+                    // sepMasks: 0 = axis-aligned rect, 1 = precise per-frame, 2 = rotated rect
+                    // Mask format: each bit = 1 pixel, MSB first, row-major.
+                    // After ALL masks, the total mask data is padded to 4-byte alignment (not per-mask).
                     val maskDataCount = reader.readInt32()
                     if (maskDataCount > 0 && width > 0 && height > 0) {
                         val bytesPerRow = (width + 7) / 8
                         val bytesPerMask = bytesPerRow * height
                         if (sepMasks == 1 || !skipNonPrecise) {
-                            masks = List(maskDataCount) {
-                                val mask = reader.readBytes(bytesPerMask)
-                                val remainder = bytesPerMask % 4
-                                if (remainder != 0) reader.skip(4 - remainder)
-                                mask
-                            }
+                            masks = List(maskDataCount) { reader.readBytes(bytesPerMask) }
                         } else {
-                            repeat(maskDataCount) {
-                                reader.skip(bytesPerMask)
-                                val remainder = bytesPerMask % 4
-                                if (remainder != 0) reader.skip(4 - remainder)
-                            }
+                            reader.skip(bytesPerMask * maskDataCount)
                         }
+                        val totalMaskBytes = bytesPerMask * maskDataCount
+                        val remainder = totalMaskBytes % 4
+                        if (remainder != 0) reader.skip(4 - remainder)
                     }
                 }
+            }
+
+            // Build sprtOffsetMap: absolute file offset -> SPRT index
+            for (i in ptrs.indices) {
+                dw.sprtOffsetMap[ptrs[i]] = i
             }
         }
 
@@ -960,16 +1080,20 @@ class DataWin {
                     smooth = reader.readBool32()
                     preload = reader.readBool32()
                     textureOffset = reader.readInt32()
-                    if (dw.gen8.major >= 2) {
-                        reader.skip(4) // gms2UnknownAlways2
+                    if (dw.isVersionAtLeast(2, 0, 0, 0)) {
+                        gms2UnknownAlways2 = reader.readInt32()
                         gms2TileWidth = reader.readInt32()
                         gms2TileHeight = reader.readInt32()
+                        if (dw.isVersionAtLeast(2024, 14, 0, 1)) {
+                            gms2TileSeparationX = reader.readInt32()
+                            gms2TileSeparationY = reader.readInt32()
+                        }
                         gms2OutputBorderX = reader.readInt32()
                         gms2OutputBorderY = reader.readInt32()
                         gms2TileColumns = reader.readInt32()
                         gms2ItemsPerTileCount = reader.readInt32()
                         gms2TileCount = reader.readInt32()
-                        reader.skip(4) // gms2ExportedSpriteIndex
+                        gms2ExportedSpriteIndex = reader.readInt32()
                         gms2FrameLength = reader.readLong()
                         val tileIdCount = gms2TileCount * gms2ItemsPerTileCount
                         gms2TileIds = IntArray(tileIdCount) { reader.readInt32() }
@@ -1047,6 +1171,32 @@ class DataWin {
 
         private fun parseFONT(reader: BinaryReader, dw: DataWin) {
             val ptrs = reader.readPointerTable()
+            if (ptrs.isEmpty()) return
+
+            // Probe how many uint32 optional fields exist between scaleY and the glyph PointerList.
+            // Optional fields appear in this order when present: AscenderOffset (BC17+), Ascender, SDFSpread, LineHeight.
+            var fontOptionalCount = if (dw.gen8.bytecodeVersion >= 17) 1 else 0
+            run {
+                val baseAfterScaleY = ptrs[0] + 40
+                var trial = fontOptionalCount
+                while (4 >= trial) {
+                    val listStart = baseAfterScaleY + 4 * trial
+                    reader.position = listStart
+                    val probedGlyphCount = reader.readInt32()
+                    if (probedGlyphCount == 0 || probedGlyphCount > 0x10000) {
+                        trial++
+                        continue
+                    }
+                    val probedFirstPtr = reader.readInt32()
+                    val expectedFirstPtr = listStart + 4 + 4 * probedGlyphCount
+                    if (probedFirstPtr == expectedFirstPtr) {
+                        fontOptionalCount = trial
+                        break
+                    }
+                    trial++
+                }
+            }
+
             dw.font.fonts = ptrs.map { ptr ->
                 reader.position = ptr
                 Font().apply {
@@ -1062,7 +1212,28 @@ class DataWin {
                     textureOffset = reader.readInt32()
                     scaleX = reader.readFloat32()
                     scaleY = reader.readFloat32()
+                    var readSoFar = 0
+                    if (dw.gen8.bytecodeVersion >= 17 && fontOptionalCount > readSoFar) {
+                        ascenderOffset = reader.readInt32()
+                        readSoFar++
+                    }
+                    if (fontOptionalCount > readSoFar) {
+                        ascender = reader.readInt32()
+                        hasAscender = true
+                        readSoFar++
+                    }
+                    if (fontOptionalCount > readSoFar) {
+                        sdfSpread = reader.readInt32()
+                        hasSDFSpread = true
+                        readSoFar++
+                    }
+                    if (fontOptionalCount > readSoFar) {
+                        lineHeight = reader.readInt32()
+                        hasLineHeight = true
+                        readSoFar++
+                    }
                     val glyphPtrs = reader.readPointerTable()
+                    var maxH = 0
                     glyphs = glyphPtrs.map { glyphPtr ->
                         reader.position = glyphPtr
                         FontGlyph().apply {
@@ -1073,12 +1244,14 @@ class DataWin {
                             sourceHeight = reader.readUint16()
                             shift = reader.readInt16()
                             offset = reader.readInt16()
+                            if (sourceHeight > maxH) maxH = sourceHeight
                             val kerningCount = reader.readUint16()
                             kerning = List(kerningCount) {
                                 KerningPair(reader.readInt16(), reader.readInt16())
                             }
                         }
                     }
+                    maxGlyphHeight = maxH
                 }
             }
         }
@@ -1107,12 +1280,40 @@ class DataWin {
 
         private fun parseOBJT(reader: BinaryReader, dw: DataWin) {
             val ptrs = reader.readPointerTable()
+
+            // Detect GMS 2022.5+ by probing the first game object's event list structure.
+            if (ptrs.isNotEmpty() && dw.isVersionAtLeast(2, 3, 0, 0) && !dw.isVersionAtLeast(2022, 5, 0, 0)) {
+                // Skip the 16 fixed uint32 header fields (name..angularDamping) to reach physicsVertexCount.
+                reader.position = ptrs[0] + 16 * 4
+                val vertexCount = reader.readInt32()
+                if (vertexCount >= 0) {
+                    // Skip friction + awake + kinematic (12 bytes) and physics vertices (8 bytes each).
+                    reader.skip(12 + vertexCount * 8)
+                    val eventTypeCount = reader.readInt32()
+                    var isOldFormat = false
+                    if (eventTypeCount == OBJT_EVENT_TYPE_COUNT) {
+                        val firstSubEventPtr = reader.readInt32()
+                        val currentAbsPos = reader.position
+                        // The remaining 14 outer-list pointers sit between here and the first sub-event list.
+                        if (firstSubEventPtr == currentAbsPos + 14 * 4) {
+                            isOldFormat = true
+                        }
+                    }
+                    if (!isOldFormat) {
+                        dw.bumpVersionTo(2022, 5, 0, 0)
+                    }
+                }
+            }
+
             dw.objt.objects = ptrs.map { ptr ->
                 reader.position = ptr
                 GameObject().apply {
                     name = reader.readStringPtr()
                     spriteId = reader.readInt32()
                     visible = reader.readBool32()
+                    if (dw.isVersionAtLeast(2022, 5, 0, 0)) {
+                        managed = reader.readBool32()
+                    }
                     solid = reader.readBool32()
                     depth = reader.readInt32()
                     persistent = reader.readBool32()
@@ -1155,6 +1356,84 @@ class DataWin {
 
         private fun parseROOM(reader: BinaryReader, dw: DataWin) {
             val ptrs = reader.readPointerTable()
+            if (ptrs.isEmpty()) return
+
+            // Detect whether RoomGameObject includes ImageSpeed/ImageIndex fields (added in GMS 2.2.2.302).
+            // UndertaleModTool detects this via the distance between the first two game object pointers: 40 bytes = legacy, 48 bytes = with ImageSpeed+ImageIndex.
+            if (dw.isVersionAtLeast(2, 0, 0, 0) && !dw.isVersionAtLeast(2, 2, 2, 302)) {
+                for (i in ptrs.indices) {
+                    reader.position = ptrs[i]
+                    // Room header layout (before gameObjectsPtr): name, caption, width, height, speed, persistent,
+                    // bgColor, drawBgColor, creationCodeId, flags, backgroundsPtr, viewsPtr = 12 uint32s.
+                    reader.skip(12 * 4)
+                    val gameObjectsPtr = reader.readInt32()
+                    reader.position = gameObjectsPtr
+                    val objCount = reader.readInt32()
+                    if (objCount >= 2) {
+                        val firstPtr = reader.readInt32()
+                        val secondPtr = reader.readInt32()
+                        if (secondPtr - firstPtr == 48) {
+                            dw.bumpVersionTo(2, 2, 2, 302)
+                        }
+                        break
+                    }
+                }
+            }
+
+            // Detect whether Layer headers include EffectEnabled/EffectType/EffectProperties fields (added in GMS 2022.1).
+            if (dw.isVersionAtLeast(2, 3, 0, 0) && !dw.isVersionAtLeast(2022, 1, 0, 0)) {
+                for (i in ptrs.indices) {
+                    reader.position = ptrs[i]
+                    // Room header before layersPtr: 22 uint32s (name..metersPerPixel).
+                    reader.skip(22 * 4)
+                    val layersPtr = reader.readInt32()
+                    val seqnPtr = reader.readInt32()
+                    reader.position = layersPtr
+                    val layerCount = reader.readInt32()
+                    if (layerCount == 0) continue
+                    val jumpOffset = reader.readInt32()
+                    val nextOffset = if (layerCount == 1) seqnPtr else reader.readInt32()
+                    // Layer header: name(4) id(4) type(4) ... we seek to jumpOffset+8 to skip name+id then read type.
+                    reader.position = jumpOffset + 8
+                    val layerType = reader.readInt32()
+                    if (layerType == RoomLayerType.PATH || layerType == RoomLayerType.PATH2) continue
+                    var detected = false
+                    when (layerType) {
+                        RoomLayerType.BACKGROUND -> {
+                            val absPos = reader.position
+                            if (nextOffset - absPos > 16 * 4) detected = true
+                        }
+                        RoomLayerType.INSTANCES -> {
+                            reader.skip(6 * 4)
+                            val instanceCount = reader.readInt32()
+                            val absPos = reader.position
+                            if (nextOffset - absPos != instanceCount * 4) detected = true
+                        }
+                        RoomLayerType.ASSETS -> {
+                            reader.skip(6 * 4)
+                            val tileOffset = reader.readInt32()
+                            val absPos = reader.position
+                            if (tileOffset != absPos + 8 && tileOffset != absPos + 12) detected = true
+                        }
+                        RoomLayerType.TILES -> {
+                            reader.skip(7 * 4)
+                            val tileMapWidth = reader.readInt32()
+                            val tileMapHeight = reader.readInt32()
+                            val absPos = reader.position
+                            if (nextOffset - absPos != tileMapWidth * tileMapHeight * 4) detected = true
+                        }
+                        RoomLayerType.EFFECT -> {
+                            reader.skip(7 * 4)
+                            val propertyCount = reader.readInt32()
+                            val absPos = reader.position
+                            if (nextOffset - absPos != propertyCount * 3 * 4) detected = true
+                        }
+                    }
+                    if (detected) dw.bumpVersionTo(2022, 1, 0, 0)
+                    break
+                }
+            }
+
             dw.room.rooms = ptrs.map { ptr ->
                 reader.position = ptr
                 Room().apply {
@@ -1181,11 +1460,15 @@ class DataWin {
                     gravityY = reader.readFloat32()
                     metersPerPixel = reader.readFloat32()
 
-                    // GMS2: read layers pointer from header
+                    if (dw.isVersionAtLeast(2024, 13, 0, 0)) {
+                        val icCount = reader.readInt32()
+                        reader.skip(4 * icCount) // instanceCreationOrderIDs
+                    }
+
                     var layersPtr = 0
-                    if (dw.gen8.major >= 2) {
+                    if (dw.isVersionAtLeast(2, 0, 0, 0)) {
                         layersPtr = reader.readInt32()
-                        if (dw.gen8.minor >= 3) {
+                        if (dw.isVersionAtLeast(2, 3, 0, 0)) {
                             reader.skip(4) // sequencesPtr
                         }
                     }
@@ -1249,9 +1532,15 @@ class DataWin {
                             creationCode = reader.readInt32()
                             scaleX = reader.readFloat32()
                             scaleY = reader.readFloat32()
+                            if (dw.isVersionAtLeast(2, 2, 2, 302)) {
+                                imageSpeed = reader.readFloat32()
+                                imageIndex = reader.readInt32()
+                            }
                             color = reader.readInt32()
                             rotation = reader.readFloat32()
-                            preCreateCode = reader.readInt32()
+                            if (dw.gen8.bytecodeVersion >= 16) {
+                                preCreateCode = reader.readInt32()
+                            }
                         }
                     }
 
@@ -1264,7 +1553,7 @@ class DataWin {
                     }
 
                     // GMS2 layers
-                    if (dw.gen8.major >= 2 && layersPtr != 0) {
+                    if (dw.isVersionAtLeast(2, 0, 0, 0) && layersPtr != 0) {
                         reader.position = layersPtr
                         val layerPtrs = reader.readPointerTable()
                         layers = layerPtrs.map { layerPtr ->
@@ -1280,7 +1569,25 @@ class DataWin {
                                 vSpeed = reader.readFloat32()
                                 visible = reader.readBool32()
 
+                                if (dw.isVersionAtLeast(2022, 1, 0, 0)) {
+                                    // EffectEnabled (bool32), EffectType (string ptr), EffectProperties (SimpleList<EffectProperty>)
+                                    reader.skip(4) // EffectEnabled
+                                    reader.skip(4) // EffectType (string ptr)
+                                    val effectPropCount = reader.readInt32()
+                                    // Each EffectProperty is 12 bytes: Kind(int32) + Name(ptr) + Value(ptr)
+                                    reader.skip(effectPropCount * 12)
+                                }
+
                                 when (type) {
+                                    RoomLayerType.PATH, RoomLayerType.PATH2 -> { /* nothing */ }
+                                    RoomLayerType.EFFECT -> {
+                                        // In GMS 2022.1+, Effect layer data is empty (fields moved to layer header).
+                                        if (!dw.isVersionAtLeast(2022, 1, 0, 0)) {
+                                            reader.skip(4) // EffectType (string ptr)
+                                            val propCount = reader.readInt32()
+                                            reader.skip(propCount * 12)
+                                        }
+                                    }
                                     RoomLayerType.ASSETS -> {
                                         val legacyTilesPtr = reader.readInt32()
                                         val spritesPtr = reader.readInt32()
@@ -1291,24 +1598,64 @@ class DataWin {
                                             reader.position = tp
                                             readRoomTile(reader, dw)
                                         }
+
+                                        reader.position = spritesPtr
+                                        val spritePtrs = reader.readPointerTable()
+                                        val spriteInstances = spritePtrs.map { sp ->
+                                            reader.position = sp
+                                            SpriteInstance().apply {
+                                                name = reader.readStringPtr()
+                                                spriteIndex = reader.readInt32()
+                                                x = reader.readInt32()
+                                                y = reader.readInt32()
+                                                scaleX = reader.readFloat32()
+                                                scaleY = reader.readFloat32()
+                                                color = reader.readInt32()
+                                                animationSpeed = reader.readFloat32()
+                                                animationSpeedType = reader.readInt32()
+                                                frameIndex = reader.readFloat32()
+                                                rotation = reader.readFloat32()
+                                            }
+                                        }
+
                                         assetsData = RoomLayerAssetsData().apply {
                                             legacyTiles = assetTiles
+                                            sprites = spriteInstances
                                         }
-                                        // Skip sprite instances (not needed for preprocessing)
                                     }
                                     RoomLayerType.BACKGROUND -> {
-                                        reader.skip(4 * 2) // visible, foreground
                                         backgroundData = RoomLayerBackgroundData().apply {
+                                            visible = reader.readBool32()
+                                            foreground = reader.readBool32()
                                             spriteIndex = reader.readInt32()
+                                            hTiled = reader.readBool32()
+                                            vTiled = reader.readBool32()
+                                            stretch = reader.readBool32()
+                                            color = reader.readInt32()
+                                            firstFrame = reader.readFloat32()
+                                            animSpeed = reader.readFloat32()
+                                            animSpeedType = reader.readInt32()
                                         }
-                                        // Skip remaining background layer fields
                                     }
                                     RoomLayerType.INSTANCES -> {
-                                        // Skip instance list (not needed for preprocessing)
+                                        val instanceCount = reader.readInt32()
+                                        instancesData = RoomLayerInstancesData().apply {
+                                            instanceIds = IntArray(instanceCount) { reader.readInt32() }
+                                        }
                                     }
-                                    RoomLayerType.PATH -> {
-                                        // Nothing to parse
+                                    RoomLayerType.TILES -> {
+                                        val bgIdx = reader.readInt32()
+                                        val tx = reader.readInt32()
+                                        val ty = reader.readInt32()
+                                        val totalTiles = tx * ty
+                                        tilesData = RoomLayerTilesData().apply {
+                                            backgroundIndex = bgIdx
+                                            tilesX = tx
+                                            tilesY = ty
+                                            tileData = IntArray(totalTiles) { reader.readInt32() }
+                                        }
                                     }
+                                    else -> error("Unsupported Room Layer Type $type")
                                 }
                             }
                         }
@@ -1321,7 +1668,7 @@ class DataWin {
             return RoomTile().apply {
                 x = reader.readInt32()
                 y = reader.readInt32()
-                useSpriteDefinition = dw.gen8.major >= 2
+                useSpriteDefinition = dw.isVersionAtLeast(2, 0, 0, 0)
                 backgroundDefinition = reader.readInt32()
                 sourceX = reader.readInt32()
                 sourceY = reader.readInt32()
@@ -1402,7 +1749,14 @@ class DataWin {
             val f = dw.func
             val funcCount = reader.readInt32()
             f.functions = List(funcCount) {
-                Function(reader.readStringPtr(), reader.readInt32(), reader.readInt32())
+                val name = reader.readStringPtr()
+                val occurrences = reader.readInt32()
+                var rawAddr = reader.readInt32()
+                // In GMS 2.3+, firstAddress points to the operand word (instruction + 4), not the instruction itself
+                if (dw.isVersionAtLeast(2, 3, 0, 0) && rawAddr != -1) {
+                    rawAddr -= 4
+                }
+                Function(name, occurrences, rawAddr)
             }
             val codeLocalsCount = reader.readInt32()
             f.codeLocals = List(codeLocalsCount) {
@@ -1428,22 +1782,61 @@ class DataWin {
             val ptrs = reader.readPointerTable()
             if (ptrs.isEmpty()) return
 
-            val hasGeneratedMips = dw.gen8.major >= 2
+            val hasGeneratedMips = dw.isVersionAtLeast(2, 0, 0, 0)
+            var has2022_3 = dw.isVersionAtLeast(2022, 3, 0, 0)
+            var has2022_9 = dw.isVersionAtLeast(2022, 9, 0, 0)
 
-            // Read metadata
-            data class TexMeta(val scaled: Int, val blobOffset: Int)
+            // Detect GMS 2022.3+ (TextureBlockSize) and 2022.9+ (Width/Height/IndexInGroup) by probing the distance between the first two entry pointers.
+            // Layouts:
+            //   pre-2022.3: scaled+generatedMips+blobOffset = 12 bytes
+            //   2022.3+: ... + textureBlockSize = 16 bytes
+            //   2022.9+: ... + width + height + indexInGroup = 28 bytes
+            if (ptrs.size >= 2 && hasGeneratedMips && !has2022_9) {
+                val diff = ptrs[1] - ptrs[0]
+                if (diff == 28) {
+                    dw.bumpVersionTo(2022, 9, 0, 0)
+                    has2022_3 = true
+                    has2022_9 = true
+                } else if (diff == 16 && !has2022_3) {
+                    dw.bumpVersionTo(2022, 3, 0, 0)
+                    has2022_3 = true
+                }
+            }
+
+            data class TexMeta(
+                val scaled: Int,
+                val generatedMips: Int,
+                val textureBlockSize: Int,
+                val textureWidth: Int,
+                val textureHeight: Int,
+                val indexInGroup: Int,
+                val blobOffset: Int
+            )
             val metas = ptrs.map { ptr ->
                 reader.position = ptr
                 val scaled = reader.readInt32()
-                if (hasGeneratedMips) reader.skip(4) // generatedMips
+                val generatedMips = if (hasGeneratedMips) reader.readInt32() else 0
+                val textureBlockSize = if (has2022_3) reader.readInt32() else 0
+                val textureWidth: Int
+                val textureHeight: Int
+                val indexInGroup: Int
+                if (has2022_9) {
+                    textureWidth = reader.readInt32()
+                    textureHeight = reader.readInt32()
+                    indexInGroup = reader.readInt32()
+                } else {
+                    textureWidth = 0
+                    textureHeight = 0
+                    indexInGroup = 0
+                }
                 val blobOffset = reader.readInt32()
-                TexMeta(scaled, blobOffset)
+                TexMeta(scaled, generatedMips, textureBlockSize, textureWidth, textureHeight, indexInGroup, blobOffset)
             }
 
             // Compute blob sizes from successive offsets
             dw.txtr.textures = metas.mapIndexed { i, meta ->
                 if (meta.blobOffset == 0) {
-                    Texture(meta.scaled, 0, 0, null)
+                    Texture(meta.scaled, 0, 0, null, meta.generatedMips, meta.textureBlockSize, meta.textureWidth, meta.textureHeight, meta.indexInGroup)
                 } else {
                     val blobSize = if (metas.size > i + 1 && metas[i + 1].blobOffset != 0) {
                         metas[i + 1].blobOffset - meta.blobOffset
@@ -1451,7 +1844,7 @@ class DataWin {
                         chunkEnd - meta.blobOffset
                     }
                     val blobData = if (blobSize > 0) reader.readBytesAt(meta.blobOffset, blobSize) else null
-                    Texture(meta.scaled, meta.blobOffset, blobSize, blobData)
+                    Texture(meta.scaled, meta.blobOffset, blobSize, blobData, meta.generatedMips, meta.textureBlockSize, meta.textureWidth, meta.textureHeight, meta.indexInGroup)
                 }
             }
         }

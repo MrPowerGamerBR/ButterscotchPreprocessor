@@ -75,9 +75,10 @@ suspend fun processDataWin(
     // Decode texture pages as PixelImages
     log("Loading texture pages...")
     val texturePages = mutableListOf<PixelImage?>()
+    val gm2022_5 = dw.isVersionAtLeast(2022, 5, 0, 0)
     for (tex in dw.txtr.textures) {
         if (tex.blobData != null) {
-            texturePages.add(decodePngBytes(tex.blobData))
+            texturePages.add(decodeImageBytes(tex.blobData, gm2022_5))
         } else {
             texturePages.add(null)
         }

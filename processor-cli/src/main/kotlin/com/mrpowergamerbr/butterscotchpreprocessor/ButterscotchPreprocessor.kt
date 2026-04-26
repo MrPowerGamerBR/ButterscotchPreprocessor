@@ -124,12 +124,13 @@ class ButterscotchPreprocessor : CliktCommand(name = "butterscotch-preprocessor"
             skipLoadingPreciseMasksForNonPreciseSprites = true
         ))
 
+        val gm2022_5 = dw.isVersionAtLeast(2022, 5, 0, 0)
         val texturePages = dw.txtr.textures.map { tex ->
-            if (tex.blobData != null) {
-                ImageIO.read(ByteArrayInputStream(tex.blobData))
-            } else {
-                null
-            }
+            val blob = tex.blobData ?: return@map null
+            val img = runBlocking { decodeImageBytes(blob, gm2022_5) }
+            val bi = BufferedImage(img.width, img.height, BufferedImage.TYPE_INT_ARGB)
+            bi.setRGB(0, 0, img.width, img.height, img.pixels, 0, img.width)
+            bi
         }
 
         dumpSprites(dw, texturePages, outputDir)
