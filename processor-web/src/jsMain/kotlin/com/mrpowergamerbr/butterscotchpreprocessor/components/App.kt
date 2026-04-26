@@ -38,6 +38,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.compose.web.attributes.InputType
+import org.jetbrains.compose.web.attributes.placeholder
 import org.jetbrains.compose.web.dom.A
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
@@ -302,6 +303,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
     val eagerlyLoadedRooms = remember {
         mutableStateSetOf<String>()
     }
+    var gameId by remember { mutableStateOf("BUTR.000_00") }
     var selectedPreset by remember { mutableStateOf<Preset?>(UNDERTALE_PRESET) }
     var startTime by remember { mutableStateOf(0.0) }
 
@@ -372,7 +374,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 val iconBytes = customIconBytes ?: fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
 
                                 // Create SYSTEM.CNF content
-                                val systemCnf = "BOOT2 = cdrom0:\\BUTR_000.00;1\nVER = 1.00\nVMODE = NTSC\n"
+                                val systemCnf = "BOOT2 = cdrom0:\\$gameId;1\nVER = 1.00\nVMODE = NTSC\n"
 
                                 // Package into ISO 9660
                                 val iso = Iso9660Creator(
@@ -395,7 +397,7 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
                                 val isoBytes = iso.create(listOf(
                                     Iso9660Creator.IsoFile("SYSTEM.CNF", systemCnf.encodeToByteArray()),
-                                    Iso9660Creator.IsoFile("BUTR_000.00", elfBytes),
+                                    Iso9660Creator.IsoFile(gameId, elfBytes),
                                     Iso9660Creator.IsoFile("DATA.WIN", dataWinBytes),
                                     Iso9660Creator.IsoFile("CLUT4.BIN", clut4Bin),
                                     Iso9660Creator.IsoFile("CLUT8.BIN", clut8Bin),
@@ -954,6 +956,24 @@ fun App(m: ButterscotchPreprocessorWeb) {
                                 Text("Select")
                             }
                         }
+                    }
+                }
+            }
+
+            FieldWrapper {
+                FieldInformation {
+                    FieldLabel("Game ID")
+                }
+
+                TextInput {
+                    placeholder("BTTR.000_00")
+                    value(gameId)
+
+                    onInput {
+                        gameId = it.value
+                            .trim()
+                            .replace(" ", "")
+                            .take(11)
                     }
                 }
             }
