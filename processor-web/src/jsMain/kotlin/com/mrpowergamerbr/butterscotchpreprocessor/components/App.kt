@@ -365,104 +365,113 @@ fun App(m: ButterscotchPreprocessorWeb) {
 
                 val dataWinBytes = loadedFileBytes!!
 
-                                // Use custom ELF if provided, otherwise fetch default from resources
-                                val validBytecodeVersion = if (parsedDataWin.gen8.bytecodeVersion == 17) 17 else 16
+                // Use custom ELF if provided, otherwise fetch default from resources
+                val validBytecodeVersion = if (parsedDataWin.gen8.bytecodeVersion == 17) 17 else 16
 
-                                val elfBytes = customElfBytes ?: fetchResourceBytes("/web/butterscotch-bc$validBytecodeVersion.elf?v=${Date.now()}")
+                val elfBytes = customElfBytes ?: fetchResourceBytes("/web/butterscotch-bc$validBytecodeVersion.elf?v=${Date.now()}")
 
-                                // Use custom icon if provided, otherwise fetch default from resources
-                                val iconBytes = customIconBytes ?: fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
+                // Use custom icon if provided, otherwise fetch default from resources
+                val iconBytes = customIconBytes ?: fetchResourceBytes("/web/ICON.ICO?v=${Date.now()}")
 
-                                // Create SYSTEM.CNF content
-                                val systemCnf = "BOOT2 = cdrom0:\\$gameId;1\nVER = 1.00\nVMODE = NTSC\n"
+                val fileSystemGameId = gameId
+                    .map {
+                        when (it) {
+                            '_' -> '.'
+                            '.' -> '_'
+                            else -> it
+                        }
+                    }.joinToString("")
 
-                                // Package into ISO 9660
-                                val iso = Iso9660Creator(
-                                    volumeId = gameName.uppercase().take(32),
-                                    systemId = "PLAYSTATION"
-                                )
-                                // Collect files mapped to $BOOT that should be included in the ISO
-                                val bootFiles = filesystemMappings
-                                    .filter { it.value.startsWith("\$BOOT:") }
-                                    .mapNotNull { (sourceFile, targetPath) ->
-                                        val isoFileName = targetPath.removePrefix("\$BOOT:")
-                                        val fileBytes = loadedSourceFiles[sourceFile]
-                                        if (fileBytes != null) {
-                                            Iso9660Creator.IsoFile(isoFileName, fileBytes)
-                                        } else {
-                                            logMessages.add("Warning: Source file \"$sourceFile\" not found in folder, skipping \$BOOT mapping")
-                                            null
-                                        }
-                                    }
+                // Create SYSTEM.CNF content
+                val systemCnf = "BOOT2 = cdrom0:\\$fileSystemGameId;1\nVER = 1.00\nVMODE = NTSC\n"
 
-                                val isoBytes = iso.create(listOf(
-                                    Iso9660Creator.IsoFile("SYSTEM.CNF", systemCnf.encodeToByteArray()),
-                                    Iso9660Creator.IsoFile(gameId, elfBytes),
-                                    Iso9660Creator.IsoFile("DATA.WIN", dataWinBytes),
-                                    Iso9660Creator.IsoFile("CLUT4.BIN", clut4Bin),
-                                    Iso9660Creator.IsoFile("CLUT8.BIN", clut8Bin),
-                                    Iso9660Creator.IsoFile("TEXTURES.BIN", texturesBin),
-                                    Iso9660Creator.IsoFile("ATLAS.BIN", atlasBin),
-                                    Iso9660Creator.IsoFile("SOUNDBNK.BIN", soundBnkBin),
-                                    Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
-                                    Iso9660Creator.IsoFile("CONFIG.JSN", buildJsonObject {
-                                        put("debugOverlayEnabled", debugOverlayEnabled)
-                                        putJsonObject("fileSystem") {
-                                            for (mapping in filesystemMappings) {
-                                                putJsonArray(mapping.key) { add(mapping.value) }
-                                            }
-                                        }
-                                        putJsonObject("controller1Mappings") {
-                                            for ((key, value) in controller1Mappings) {
-                                                put(key.value.toString(), value.value)
-                                            }
-                                        }
-                                        putJsonObject("controller2Mappings") {
-                                            for ((key, value) in controller2Mappings) {
-                                                put(key.value.toString(), value.value)
-                                            }
-                                        }
+                // Package into ISO 9660
+                val iso = Iso9660Creator(
+                    volumeId = gameName.uppercase().take(32),
+                    systemId = "PLAYSTATION"
+                )
+                // Collect files mapped to $BOOT that should be included in the ISO
+                val bootFiles = filesystemMappings
+                    .filter { it.value.startsWith("\$BOOT:") }
+                    .mapNotNull { (sourceFile, targetPath) ->
+                        val isoFileName = targetPath.removePrefix("\$BOOT:")
+                        val fileBytes = loadedSourceFiles[sourceFile]
+                        if (fileBytes != null) {
+                            Iso9660Creator.IsoFile(isoFileName, fileBytes)
+                        } else {
+                            logMessages.add("Warning: Source file \"$sourceFile\" not found in folder, skipping \$BOOT mapping")
+                            null
+                        }
+                    }
 
-                                        putJsonObject("saveIcon") {
-                                            put("bgAlpha", bgAlpha)
-                                            putJsonArray("bgColors") {
-                                                addJsonArray { add(bgColorTopLeft.red); add(bgColorTopLeft.green); add(bgColorTopLeft.blue) }
-                                                addJsonArray { add(bgColorTopRight.red); add(bgColorTopRight.green); add(bgColorTopRight.blue) }
-                                                addJsonArray { add(bgColorBottomLeft.red); add(bgColorBottomLeft.green); add(bgColorBottomLeft.blue) }
-                                                addJsonArray { add(bgColorBottomRight.red); add(bgColorBottomRight.green); add(bgColorBottomRight.blue) }
-                                            }
-                                            putJsonArray("lightDirs") {
-                                                addJsonArray { add(lightDir1X.toDoubleOrNull() ?: 0.0); add(lightDir1Y.toDoubleOrNull() ?: 0.0); add(lightDir1Z.toDoubleOrNull() ?: 0.0) }
-                                                addJsonArray { add(lightDir2X.toDoubleOrNull() ?: 0.0); add(lightDir2Y.toDoubleOrNull() ?: 0.0); add(lightDir2Z.toDoubleOrNull() ?: 0.0) }
-                                                addJsonArray { add(lightDir3X.toDoubleOrNull() ?: 0.0); add(lightDir3Y.toDoubleOrNull() ?: 0.0); add(lightDir3Z.toDoubleOrNull() ?: 0.0) }
-                                            }
-                                            putJsonArray("lightColors") {
-                                                addJsonArray { add(lightColor1.red / 255.0); add(lightColor1.green / 255.0); add(lightColor1.blue / 255.0) }
-                                                addJsonArray { add(lightColor2.red / 255.0); add(lightColor2.green / 255.0); add(lightColor2.blue / 255.0) }
-                                                addJsonArray { add(lightColor3.red / 255.0); add(lightColor3.green / 255.0); add(lightColor3.blue / 255.0) }
-                                            }
-                                            putJsonArray("ambient") { add(ambientColor.red / 255.0); add(ambientColor.green / 255.0); add(ambientColor.blue / 255.0) }
-                                        }
-                                        putJsonArray("disabledObjects") {
-                                            for (disabledObject in disabledObjects) {
-                                                add(disabledObject)
-                                            }
-                                        }
-                                        put("lazyLoadRooms", lazyLoadRooms)
-                                        putJsonArray("eagerlyLoadedRooms") {
-                                            for (eagerlyLoadedRoom in eagerlyLoadedRooms) {
-                                                add(eagerlyLoadedRoom)
-                                            }
-                                        }
-                                    }.toString().encodeToByteArray()),
-                                    Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
-                                ) + bootFiles)
+                val isoBytes = iso.create(listOf(
+                    Iso9660Creator.IsoFile("SYSTEM.CNF", systemCnf.encodeToByteArray()),
+                    Iso9660Creator.IsoFile(fileSystemGameId, elfBytes),
+                    Iso9660Creator.IsoFile("DATA.WIN", dataWinBytes),
+                    Iso9660Creator.IsoFile("CLUT4.BIN", clut4Bin),
+                    Iso9660Creator.IsoFile("CLUT8.BIN", clut8Bin),
+                    Iso9660Creator.IsoFile("TEXTURES.BIN", texturesBin),
+                    Iso9660Creator.IsoFile("ATLAS.BIN", atlasBin),
+                    Iso9660Creator.IsoFile("SOUNDBNK.BIN", soundBnkBin),
+                    Iso9660Creator.IsoFile("SOUNDS.BIN", soundsBin),
+                    Iso9660Creator.IsoFile("CONFIG.JSN", buildJsonObject {
+                        put("debugOverlayEnabled", debugOverlayEnabled)
+                        putJsonObject("fileSystem") {
+                            for (mapping in filesystemMappings) {
+                                putJsonArray(mapping.key) { add(mapping.value) }
+                            }
+                        }
+                        putJsonObject("controller1Mappings") {
+                            for ((key, value) in controller1Mappings) {
+                                put(key.value.toString(), value.value)
+                            }
+                        }
+                        putJsonObject("controller2Mappings") {
+                            for ((key, value) in controller2Mappings) {
+                                put(key.value.toString(), value.value)
+                            }
+                        }
 
-                                isoFileName = "${gameName}.iso"
-                                val blob = Blob(arrayOf(isoBytes), BlobPropertyBag(type = "application/octet-stream"))
-                                downloadUrl = URL.createObjectURL(blob)
-                                status = "Done! Took ${Date.now() - startTime}ms"
-                                plausible("Generated PS2 ISO")
+                        putJsonObject("saveIcon") {
+                            put("bgAlpha", bgAlpha)
+                            putJsonArray("bgColors") {
+                                addJsonArray { add(bgColorTopLeft.red); add(bgColorTopLeft.green); add(bgColorTopLeft.blue) }
+                                addJsonArray { add(bgColorTopRight.red); add(bgColorTopRight.green); add(bgColorTopRight.blue) }
+                                addJsonArray { add(bgColorBottomLeft.red); add(bgColorBottomLeft.green); add(bgColorBottomLeft.blue) }
+                                addJsonArray { add(bgColorBottomRight.red); add(bgColorBottomRight.green); add(bgColorBottomRight.blue) }
+                            }
+                            putJsonArray("lightDirs") {
+                                addJsonArray { add(lightDir1X.toDoubleOrNull() ?: 0.0); add(lightDir1Y.toDoubleOrNull() ?: 0.0); add(lightDir1Z.toDoubleOrNull() ?: 0.0) }
+                                addJsonArray { add(lightDir2X.toDoubleOrNull() ?: 0.0); add(lightDir2Y.toDoubleOrNull() ?: 0.0); add(lightDir2Z.toDoubleOrNull() ?: 0.0) }
+                                addJsonArray { add(lightDir3X.toDoubleOrNull() ?: 0.0); add(lightDir3Y.toDoubleOrNull() ?: 0.0); add(lightDir3Z.toDoubleOrNull() ?: 0.0) }
+                            }
+                            putJsonArray("lightColors") {
+                                addJsonArray { add(lightColor1.red / 255.0); add(lightColor1.green / 255.0); add(lightColor1.blue / 255.0) }
+                                addJsonArray { add(lightColor2.red / 255.0); add(lightColor2.green / 255.0); add(lightColor2.blue / 255.0) }
+                                addJsonArray { add(lightColor3.red / 255.0); add(lightColor3.green / 255.0); add(lightColor3.blue / 255.0) }
+                            }
+                            putJsonArray("ambient") { add(ambientColor.red / 255.0); add(ambientColor.green / 255.0); add(ambientColor.blue / 255.0) }
+                        }
+                        putJsonArray("disabledObjects") {
+                            for (disabledObject in disabledObjects) {
+                                add(disabledObject)
+                            }
+                        }
+                        put("lazyLoadRooms", lazyLoadRooms)
+                        putJsonArray("eagerlyLoadedRooms") {
+                            for (eagerlyLoadedRoom in eagerlyLoadedRooms) {
+                                add(eagerlyLoadedRoom)
+                            }
+                        }
+                    }.toString().encodeToByteArray()),
+                    Iso9660Creator.IsoFile("ICON.ICO", iconBytes)
+                ) + bootFiles)
+
+                isoFileName = "${gameName}.iso"
+                val blob = Blob(arrayOf(isoBytes), BlobPropertyBag(type = "application/octet-stream"))
+                downloadUrl = URL.createObjectURL(blob)
+                status = "Done! Took ${Date.now() - startTime}ms"
+                plausible("Generated PS2 ISO")
             } catch (e: Exception) {
                 status = "Error creating ISO: ${e.message}"
                 logMessages.add("Error: ${e.stackTraceToString()}")
