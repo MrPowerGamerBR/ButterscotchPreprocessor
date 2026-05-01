@@ -602,8 +602,9 @@ private fun convertARGBtoPS2RGBA(argb: Int): Int {
     val r = (argb ushr 16) and 0xFF
     val g = (argb ushr 8) and 0xFF
     val b = argb and 0xFF
-    // PS2 alpha: 0-255 -> 0-128 (>> 1), fully opaque = 0x80
-    val ps2Alpha = a shr 1
+    // PS2 alpha: 0-255 -> 0-128 (>> 1) + 1, fully opaque = 0x80
+    val ps2Alpha = (a + 1) ushr 1
+
     return (ps2Alpha shl 24) or (b shl 16) or (g shl 8) or r
 }
 
