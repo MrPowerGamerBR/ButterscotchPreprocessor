@@ -152,8 +152,8 @@ private val UNDERTALE_PRESET = Preset(
     bgColorBottomRight = Color(180, 140, 0),
     ambientColor = Color(255, 204, 0),
     lights = DEFAULT_LIGHT_SETTINGS,
-    lazyLoadRooms = false,
-    eagerlyLoadedRooms = emptySet(),
+    lazyLoadRooms = true,
+    eagerlyLoadedRooms = setOf("room_battle"),
     debugOverlayEnabled = true,
     force4bppPatterns = emptySet(),
 )
@@ -229,7 +229,120 @@ private val DELTARUNE_CHAPTER_1_AND_2_PRESET = Preset(
     force4bppPatterns = emptySet(),
 )
 
-private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET, DELTARUNE_CHAPTER_1_AND_2_PRESET)
+val DELTARUNE_FILESYSTEM_MAPPINGS = mapOf(
+    "lang/lang_en.json" to "\$BOOT:LANG/LANG_EN.JSON",
+    "lang/lang_ja.json" to "\$BOOT:LANG/LANG_JA.JSON",
+    "filech1_0" to "mc0:/DELTARUNE/filech1_0",
+    "filech1_1" to "mc0:/DELTARUNE/filech1_1",
+    "filech1_2" to "mc0:/DELTARUNE/filech1_2",
+    "filech1_3" to "mc0:/DELTARUNE/filech1_3",
+    "filech1_4" to "mc0:/DELTARUNE/filech1_4",
+    "filech1_5" to "mc0:/DELTARUNE/filech1_5",
+    "filech1_9" to "mc0:/DELTARUNE/filech1_9",
+    "filech2_0" to "mc0:/DELTARUNE/filech2_0",
+    "filech2_1" to "mc0:/DELTARUNE/filech2_1",
+    "filech2_2" to "mc0:/DELTARUNE/filech2_2",
+    "filech2_3" to "mc0:/DELTARUNE/filech2_3",
+    "filech2_4" to "mc0:/DELTARUNE/filech2_4",
+    "filech2_5" to "mc0:/DELTARUNE/filech2_5",
+    "filech2_9" to "mc0:/DELTARUNE/filech2_9",
+    "filech3_1" to "mc0:/DELTARUNE/filech3_1",
+    "filech3_2" to "mc0:/DELTARUNE/filech3_2",
+    "filech3_3" to "mc0:/DELTARUNE/filech3_3",
+    "filech3_4" to "mc0:/DELTARUNE/filech3_4",
+    "filech3_5" to "mc0:/DELTARUNE/filech3_5",
+    "filech3_9" to "mc0:/DELTARUNE/filech3_9",
+    "filech4_1" to "mc0:/DELTARUNE/filech4_1",
+    "filech4_2" to "mc0:/DELTARUNE/filech4_2",
+    "filech4_3" to "mc0:/DELTARUNE/filech4_3",
+    "filech4_4" to "mc0:/DELTARUNE/filech4_4",
+    "filech4_5" to "mc0:/DELTARUNE/filech4_5",
+    "filech4_9" to "mc0:/DELTARUNE/filech4_9",
+    "dr.ini" to "mc0:/DELTARUNE/dr.ini",
+    "true_config.ini" to "mc0:/DELTARUNE/true_config.ini"
+)
+
+private val DELTARUNE_CHAPTER_1 = Preset(
+    displayName = "DELTARUNE Chapter 1",
+    gen8MatchName = "DELTARUNE Chapter 1",
+    controller1Mappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    controller2Mappings = emptyMap(),
+    filesystemMappings = DELTARUNE_FILESYSTEM_MAPPINGS,
+    disabledObjects = emptySet(),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(50, 20, 100),
+    bgColorTopRight = Color(50, 20, 100),
+    bgColorBottomLeft = Color(20, 5, 50),
+    bgColorBottomRight = Color(20, 5, 50),
+    ambientColor = Color(50, 20, 100),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = true,
+    eagerlyLoadedRooms = emptySet(),
+    debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
+)
+
+private val DELTARUNE_CHAPTER_2 = Preset(
+    displayName = "DELTARUNE Chapter 2",
+    gen8MatchName = "DELTARUNE Chapter 2",
+    controller1Mappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    controller2Mappings = emptyMap(),
+    filesystemMappings = DELTARUNE_FILESYSTEM_MAPPINGS,
+    disabledObjects = emptySet(),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(50, 20, 100),
+    bgColorTopRight = Color(50, 20, 100),
+    bgColorBottomLeft = Color(20, 5, 50),
+    bgColorBottomRight = Color(20, 5, 50),
+    ambientColor = Color(50, 20, 100),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = true,
+    eagerlyLoadedRooms = emptySet(),
+    debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
+)
+
+private val DELTARUNE_CHAPTER_3 = Preset(
+    displayName = "DELTARUNE Chapter 3",
+    gen8MatchName = "DELTARUNE Chapter 3",
+    controller1Mappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    controller2Mappings = emptyMap(),
+    filesystemMappings = DELTARUNE_FILESYSTEM_MAPPINGS,
+    disabledObjects = emptySet(),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(50, 20, 100),
+    bgColorTopRight = Color(50, 20, 100),
+    bgColorBottomLeft = Color(20, 5, 50),
+    bgColorBottomRight = Color(20, 5, 50),
+    ambientColor = Color(50, 20, 100),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = true,
+    eagerlyLoadedRooms = emptySet(),
+    debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
+)
+
+private val DELTARUNE_CHAPTER_4 = Preset(
+    displayName = "DELTARUNE Chapter 4",
+    gen8MatchName = "DELTARUNE Chapter 4",
+    controller1Mappings = UNDERTALE_CONTROLLER_MAPPINGS,
+    controller2Mappings = emptyMap(),
+    filesystemMappings = DELTARUNE_FILESYSTEM_MAPPINGS,
+    disabledObjects = emptySet(),
+    bgAlpha = 68,
+    bgColorTopLeft = Color(50, 20, 100),
+    bgColorTopRight = Color(50, 20, 100),
+    bgColorBottomLeft = Color(20, 5, 50),
+    bgColorBottomRight = Color(20, 5, 50),
+    ambientColor = Color(50, 20, 100),
+    lights = DEFAULT_LIGHT_SETTINGS,
+    lazyLoadRooms = true,
+    eagerlyLoadedRooms = emptySet(),
+    debugOverlayEnabled = true,
+    force4bppPatterns = emptySet(),
+)
+
+private val PRESETS = listOf(UNDERTALE_PRESET, SURVEY_PROGRAM_PRESET, DELTARUNE_CHAPTER_1_AND_2_PRESET, DELTARUNE_CHAPTER_1, DELTARUNE_CHAPTER_2, DELTARUNE_CHAPTER_3, DELTARUNE_CHAPTER_4)
 
 @Composable
 fun App(m: ButterscotchPreprocessorWeb) {
