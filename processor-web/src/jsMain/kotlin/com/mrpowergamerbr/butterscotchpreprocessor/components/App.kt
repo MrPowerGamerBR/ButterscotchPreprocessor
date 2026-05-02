@@ -774,7 +774,14 @@ fun App(m: ButterscotchPreprocessorWeb) {
             Text("Select a preset to quickly configure the settings for a specific game, or customize the options below.")
         }
 
-        Div({ classes("preset-buttons"); style { property("display", "flex"); property("gap", "8px") } }) {
+        Div({
+            classes("preset-buttons");
+            style {
+                property("display", "flex")
+                property("gap", "8px")
+                property("flex-wrap", "auto")
+            }
+        }) {
             for (preset in PRESETS) {
                 DiscordButton(
                     DiscordButtonType.PRIMARY,
