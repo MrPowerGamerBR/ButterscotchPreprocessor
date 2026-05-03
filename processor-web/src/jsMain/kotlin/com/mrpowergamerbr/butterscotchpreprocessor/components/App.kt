@@ -153,7 +153,7 @@ private val UNDERTALE_PRESET = Preset(
     ambientColor = Color(255, 204, 0),
     lights = DEFAULT_LIGHT_SETTINGS,
     lazyLoadRooms = true,
-    eagerlyLoadedRooms = setOf("room_battle"),
+    eagerlyLoadedRooms = emptySet(),
     debugOverlayEnabled = true,
     force4bppPatterns = emptySet(),
 )
